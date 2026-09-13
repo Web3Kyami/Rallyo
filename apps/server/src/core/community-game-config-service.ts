@@ -8,6 +8,9 @@ import { parseScrambleConfig } from '../games/scramble/config'
 export const GAME_KEYS = ['project_quiz', 'word_seek', 'scramble'] as const
 export type GameKey = (typeof GAME_KEYS)[number]
 
+export const OPTIONAL_CAPABILITY_KEYS = ['social_tasks', 'message_activity'] as const
+export type OptionalCapabilityKey = (typeof OPTIONAL_CAPABILITY_KEYS)[number]
+
 const capabilityConfigSchema = z.record(z.string(), z.unknown())
 
 export const projectQuizPresentationSchema = z.enum(['typed', 'multiple_choice'])

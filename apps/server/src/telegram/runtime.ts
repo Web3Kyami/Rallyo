@@ -1,6 +1,6 @@
 import { matchesAcceptedAnswer } from '@rallyo/core'
 import { createRallyoBot } from '@rallyo/telegram'
-import { and, asc, eq, gt, gte, isNull, lte, or } from 'drizzle-orm'
+import { and, asc, eq, gt, gte, inArray, isNull, lte, or } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Context } from 'grammy'
 import { InlineKeyboard } from 'grammy'
@@ -13,6 +13,7 @@ import {
   releaseTelegramUpdate,
 } from '../db/telegram-updates'
 import { RoundService } from '../core/round-service'
+import { ActivityService } from '../core/activity-service'
 import {
   CommunityGameConfigService,
   type ProjectQuizConfig,
@@ -27,6 +28,8 @@ import { ScheduleService } from '../core/schedule-service'
 import { ScheduleWorker } from '../core/schedule-worker'
 import { ScheduledQuizService } from '../core/scheduled-quiz-service'
 import { WalletLinkService } from '../core/wallet-link-service'
+import { ManualScoreService } from '../core/manual-score-service'
+import { SocialTaskService } from '../core/social-task-service'
 import { ScrambleService, type ScrambleRound } from '../games/scramble/service'
 import { WordSeekService } from '../games/word-seek/service'
 import {
@@ -107,6 +110,9 @@ export function createTelegramRuntime(options: TelegramRuntimeOptions) {
   const scheduleService = new ScheduleService(options.database)
   const scheduledQuizService = new ScheduledQuizService(options.database)
   const walletLinkService = new WalletLinkService(options.database)
+  const activityService = new ActivityService(options.database)
+  const manualScoreService = new ManualScoreService(options.database)
+  const socialTaskService = new SocialTaskService(options.database)
   const scrambleService = new ScrambleService(options.database, gameConfigurations)
   const wordSeekService = new WordSeekService(options.database, gameConfigurations)
   let presentRoundForAdmin: PresentRound | null = null
@@ -168,6 +174,48 @@ export function createTelegramRuntime(options: TelegramRuntimeOptions) {
     onWordSeekWords: async (context) => {
       await handleWordSeekWords(options.database, context)
     },
+    onTasks: async (context) => {
+      await handleTasks(options.database, socialTaskService, gameConfigurations, context, now())
+    },
+    onTaskSubmit: async (context) => {
+      await handleTaskSubmit(
+        options.database,
+        socialTaskService,
+        gameConfigurations,
+        context,
+        now(),
+      )
+    },
+    onTaskCreate: async (context) => {
+      await handleTaskCreate(
+        options.database,
+        socialTaskService,
+        gameConfigurations,
+        context,
+        now(),
+      )
+    },
+    onTaskReview: async (context) => {
+      await handleTaskReview(
+        options.database,
+        socialTaskService,
+        gameConfigurations,
+        context,
+        now(),
+      )
+    },
+    onTaskExpire: async (context) => {
+      await handleTaskExpire(
+        options.database,
+        socialTaskService,
+        gameConfigurations,
+        context,
+        now(),
+      )
+    },
+    onManualAward: async (context) => {
+      await handleManualAward(options.database, manualScoreService, context, now())
+    },
     onScrambleStart: async (context) => {
       await handleScrambleStart(
         options.database,
@@ -190,7 +238,15 @@ export function createTelegramRuntime(options: TelegramRuntimeOptions) {
       }
     },
     onGroupText: async (context) => {
-      await handleGroupText(options.database, roundService, scrambleService, context, now())
+      await handleGroupText(
+        options.database,
+        roundService,
+        scrambleService,
+        activityService,
+        gameConfigurations,
+        context,
+        now(),
+      )
       if (!isGroupContext(context)) {
         await handleAdminText(options.database, context, now())
       } else {
@@ -205,6 +261,7 @@ export function createTelegramRuntime(options: TelegramRuntimeOptions) {
         gameConfigurations,
         scrambleService,
         wordSeekService,
+        socialTaskService,
         context,
         now(),
         () => presentRoundForAdmin,
@@ -217,6 +274,8 @@ export function createTelegramRuntime(options: TelegramRuntimeOptions) {
         options.database,
         roundService,
         walletLinkService,
+        socialTaskService,
+        gameConfigurations,
         context,
         now(),
         options.appBaseUrl,
@@ -601,6 +660,8 @@ async function handleGroupText(
   database: RallyoDatabase,
   roundService: RoundService,
   scrambleService: ScrambleService,
+  activityService: ActivityService,
+  gameConfigurations: CommunityGameConfigService,
   context: Context,
   currentTime: Date,
 ): Promise<void> {
@@ -612,6 +673,16 @@ async function handleGroupText(
 
   if (!community) {
     return
+  }
+
+  if (await gameConfigurations.isEnabled(community.id, 'message_activity')) {
+    const { playerId } = await ensureTelegramPlayer(database, context)
+    await activityService.recordMessage({
+      communityId: community.id,
+      playerId,
+      bucketStart: activityBucketStart(currentTime),
+      isReply: Boolean(context.message.reply_to_message),
+    })
   }
 
   if (!context.message.text.trimStart().startsWith('/')) {
@@ -741,6 +812,11 @@ async function handleGroupText(
   ) {
     await context.reply('Round already answered.')
   }
+}
+
+function activityBucketStart(currentTime: Date): Date {
+  const bucketMilliseconds = 60 * 60 * 1_000
+  return new Date(Math.floor(currentTime.getTime() / bucketMilliseconds) * bucketMilliseconds)
 }
 
 async function handleWordSeekText(
@@ -990,6 +1066,351 @@ async function handleWordSeekApprovalCallback(
   }
 }
 
+async function handleTasks(
+  database: RallyoDatabase,
+  socialTaskService: SocialTaskService,
+  gameConfigurations: CommunityGameConfigService,
+  context: Context,
+  currentTime: Date,
+): Promise<void> {
+  if (!isGroupContext(context)) {
+    await context.reply('View community tasks inside the group where they are offered.')
+    return
+  }
+
+  const community = await ensureCommunityFromContext(database, context)
+  if (!(await gameConfigurations.isEnabled(community.id, 'social_tasks'))) {
+    await context.reply('Social tasks are disabled in this community.')
+    return
+  }
+  const tasks = await socialTaskService.listActive(community.id, currentTime)
+  if (tasks.length === 0) {
+    await context.reply(
+      '<b>COMMUNITY TASKS</b>\n\nThere are no active tasks right now.',
+      messageOptions(),
+    )
+    return
+  }
+
+  await context.reply(
+    renderSocialTaskList(tasks, currentTime),
+    messageOptions(socialTaskListKeyboard(tasks)),
+  )
+}
+
+async function handleTaskSubmit(
+  database: RallyoDatabase,
+  socialTaskService: SocialTaskService,
+  gameConfigurations: CommunityGameConfigService,
+  context: Context,
+  currentTime: Date,
+): Promise<void> {
+  if (!isGroupContext(context) || !context.from) {
+    await context.reply('Submit a task reference inside the community group.')
+    return
+  }
+
+  const community = await findCommunityByTelegramChatId(database, BigInt(context.chat.id))
+  if (!community) {
+    await context.reply('This group is not installed as a Rallyo community yet.')
+    return
+  }
+  if (!(await gameConfigurations.isEnabled(community.id, 'social_tasks'))) {
+    await context.reply('Social tasks are disabled in this community.')
+    return
+  }
+
+  const reference = (context.message?.text ?? '').replace(/^\/task_submit(?:@\w+)?\s*/iu, '').trim()
+  if (!reference) {
+    await context.reply('Usage: /task_submit URL or reference')
+    return
+  }
+
+  const session = await socialTaskService.activeSubmissionSession({
+    telegramUserId: BigInt(context.from.id),
+    communityId: community.id,
+    now: currentTime,
+  })
+  if (!session) {
+    await context.reply('Choose a task with /tasks first, then submit its URL or reference.')
+    return
+  }
+
+  const { playerId } = await ensureTelegramPlayer(database, context)
+  try {
+    await socialTaskService.submit({
+      taskId: session.session.taskId,
+      playerId,
+      reference,
+      now: currentTime,
+    })
+    await socialTaskService.clearSubmissionSession(BigInt(context.from.id), community.id)
+    await context.reply(
+      `Submission received for <b>${escapeHtml(session.task.title)}</b>. A community reviewer will check it.`,
+      messageOptions(),
+    )
+  } catch (error) {
+    await context.reply(
+      error instanceof Error ? error.message : 'The task submission could not be saved.',
+    )
+  }
+}
+
+async function handleTaskCreate(
+  database: RallyoDatabase,
+  socialTaskService: SocialTaskService,
+  gameConfigurations: CommunityGameConfigService,
+  context: Context,
+  currentTime: Date,
+): Promise<void> {
+  if (!isGroupContext(context) || !context.from) {
+    await context.reply('Create tasks inside the community group.')
+    return
+  }
+  if (!(await verifyTelegramAdmin(context, context.chat.id, context.from.id))) {
+    await context.reply('Only a verified community admin can create tasks.')
+    return
+  }
+
+  const community = await ensureCommunityFromContext(database, context)
+  await rememberVerifiedAdmin(database, context, community.id, currentTime)
+  if (!(await gameConfigurations.isEnabled(community.id, 'social_tasks'))) {
+    await context.reply('Enable Social tasks from /settings before creating a task.')
+    return
+  }
+  const raw = (context.message?.text ?? '').replace(/^\/task_create(?:@\w+)?\s*/iu, '').trim()
+  const fields = raw.split('|').map((field) => field.trim())
+  const title = fields[0]
+  const instructions = fields[1]
+  const points = Number(fields[2])
+  const hours = Number(fields[3])
+  const maxSubmissions = fields[4] ? Number(fields[4]) : undefined
+  const cooldownDays = fields[5] ? Number(fields[5]) : undefined
+
+  if (!title || !instructions || !Number.isSafeInteger(points) || !Number.isSafeInteger(hours)) {
+    await context.reply(
+      'Usage: /task_create Title | instructions | points | hours | optional cap | optional cooldown days',
+    )
+    return
+  }
+  if (hours < 1 || hours > 24 * 30) {
+    await context.reply('Task duration must be from 1 hour to 30 days.')
+    return
+  }
+
+  try {
+    const task = await socialTaskService.createTask({
+      communityId: community.id,
+      title,
+      instructions,
+      points,
+      startsAt: currentTime,
+      endsAt: new Date(currentTime.getTime() + hours * 60 * 60_000),
+      ...(maxSubmissions === undefined ? {} : { maxSubmissionsPerPlayer: maxSubmissions }),
+      ...(cooldownDays === undefined ? {} : { cooldownDays }),
+      createdByTelegramUserId: BigInt(context.from.id),
+    })
+    await context.reply(
+      `Task created: <b>${escapeHtml(task.title)}</b>\n\nUse /tasks to let players submit a URL or reference.`,
+      messageOptions(),
+    )
+  } catch (error) {
+    await context.reply(error instanceof Error ? error.message : 'The task could not be created.')
+  }
+}
+
+async function handleTaskReview(
+  database: RallyoDatabase,
+  socialTaskService: SocialTaskService,
+  gameConfigurations: CommunityGameConfigService,
+  context: Context,
+  currentTime: Date,
+  targetCommunityId?: string,
+): Promise<void> {
+  if (!context.from) {
+    await context.reply('Review tasks as a verified community administrator.')
+    return
+  }
+
+  const community = isGroupContext(context)
+    ? await ensureCommunityFromContext(database, context)
+    : targetCommunityId
+      ? await findCommunityById(database, targetCommunityId)
+      : null
+  if (!community) {
+    await context.reply('Review tasks inside a Rallyo community group or its private controls.')
+    return
+  }
+  if (
+    !(await verifyTelegramAdmin(
+      context,
+      toTelegramApiChatId(community.telegramChatId),
+      context.from.id,
+    ))
+  ) {
+    await context.reply('Only a verified community admin can review tasks.')
+    return
+  }
+
+  await rememberVerifiedAdmin(database, context, community.id, currentTime)
+  if (!(await gameConfigurations.isEnabled(community.id, 'social_tasks'))) {
+    await context.reply('Social tasks are disabled in this community.')
+    return
+  }
+  const pending = await socialTaskService.listPendingSubmissions(community.id, currentTime)
+  if (pending.length === 0) {
+    await context.reply('<b>TASK REVIEW</b>\n\nThere are no pending submissions.', messageOptions())
+    return
+  }
+
+  await context.reply(
+    renderPendingSocialTasks(pending),
+    messageOptions(pendingSocialTaskKeyboard(pending)),
+  )
+}
+
+async function handleTaskExpire(
+  database: RallyoDatabase,
+  socialTaskService: SocialTaskService,
+  gameConfigurations: CommunityGameConfigService,
+  context: Context,
+  currentTime: Date,
+): Promise<void> {
+  if (!isGroupContext(context) || !context.from) {
+    await context.reply('Expire tasks inside the community group.')
+    return
+  }
+  if (!(await verifyTelegramAdmin(context, context.chat.id, context.from.id))) {
+    await context.reply('Only a verified community admin can expire tasks.')
+    return
+  }
+
+  const community = await ensureCommunityFromContext(database, context)
+  await rememberVerifiedAdmin(database, context, community.id, currentTime)
+  if (!(await gameConfigurations.isEnabled(community.id, 'social_tasks'))) {
+    await context.reply('Social tasks are disabled in this community.')
+    return
+  }
+  const archived = await socialTaskService.archiveExpired(currentTime, community.id)
+  await context.reply(`Archived ${archived} expired task${archived === 1 ? '' : 's'}.`)
+}
+
+async function handleManualAward(
+  database: RallyoDatabase,
+  manualScoreService: ManualScoreService,
+  context: Context,
+  currentTime: Date,
+): Promise<void> {
+  if (!isGroupContext(context) || !context.from) {
+    await context.reply('Award points inside the community group.')
+    return
+  }
+  if (!(await verifyTelegramAdmin(context, context.chat.id, context.from.id))) {
+    await context.reply('Only a verified community admin can award points.')
+    return
+  }
+
+  const community = await ensureCommunityFromContext(database, context)
+  await rememberVerifiedAdmin(database, context, community.id, currentTime)
+  const fields = (context.message?.text ?? '')
+    .replace(/^\/award(?:@\w+)?\s*/iu, '')
+    .trim()
+    .split(/\s+/u)
+  const targetTelegramUserId = parseTelegramChatId(fields[0] ?? '')
+  const points = Number(fields[1])
+  const reason = fields.slice(2).join(' ').trim()
+
+  if (targetTelegramUserId === null || !Number.isSafeInteger(points) || !reason) {
+    await context.reply('Usage: /award TELEGRAM_USER_ID positive_points reason')
+    return
+  }
+
+  const [identity] = await database
+    .select({
+      playerId: schema.telegramIdentities.playerId,
+      displayName: schema.telegramIdentities.displayName,
+    })
+    .from(schema.telegramIdentities)
+    .where(eq(schema.telegramIdentities.telegramUserId, targetTelegramUserId))
+    .limit(1)
+  if (!identity) {
+    await context.reply('That Telegram player has not joined Rallyo yet.')
+    return
+  }
+
+  try {
+    const result = await manualScoreService.award({
+      communityId: community.id,
+      playerId: identity.playerId,
+      points,
+      reason,
+      awardedByTelegramUserId: BigInt(context.from.id),
+      idempotencyKey: `manual:${community.id}:telegram-update:${context.update.update_id}`,
+      now: currentTime,
+    })
+    await context.reply(
+      `${result.created ? 'Awarded' : 'Already awarded'} <b>+${points} pts</b> to <b>${escapeHtml(identity.displayName)}</b>.`,
+      messageOptions(),
+    )
+  } catch (error) {
+    await context.reply(error instanceof Error ? error.message : 'The manual award failed.')
+  }
+}
+
+async function handleSocialTaskReviewCallback(
+  database: RallyoDatabase,
+  socialTaskService: SocialTaskService,
+  context: Context,
+  communityId: string,
+  submissionId: string,
+  action: 'approve' | 'reject',
+  currentTime: Date,
+): Promise<void> {
+  const community = await findCommunityById(database, communityId)
+  if (!community || !context.from) {
+    await context.answerCallbackQuery({ text: 'Community not found.' })
+    return
+  }
+  const callbackChatId = context.callbackQuery?.message?.chat.id
+  const callbackChatType = context.callbackQuery?.message?.chat.type
+  if (callbackChatId !== undefined) {
+    const validGroupChat =
+      (callbackChatType === 'group' || callbackChatType === 'supergroup') &&
+      BigInt(callbackChatId) === community.telegramChatId
+    const validPrivateChat = callbackChatType === 'private' && callbackChatId === context.from.id
+    if (!validGroupChat && !validPrivateChat) {
+      await context.answerCallbackQuery({ text: 'This review belongs to another community.' })
+      return
+    }
+  }
+
+  try {
+    if (action === 'approve') {
+      const result = await socialTaskService.approve({
+        submissionId,
+        reviewerTelegramUserId: BigInt(context.from.id),
+        now: currentTime,
+      })
+      await context.answerCallbackQuery({ text: 'Submission approved.' })
+      await context.reply(
+        `Submission approved. <b>+${result.scoreEvent.delta} pts</b> entered the community leaderboard.`,
+        messageOptions(),
+      )
+    } else {
+      await socialTaskService.reject({
+        submissionId,
+        reviewerTelegramUserId: BigInt(context.from.id),
+        now: currentTime,
+      })
+      await context.answerCallbackQuery({ text: 'Submission rejected.' })
+      await context.reply('Submission rejected. No points were awarded.', messageOptions())
+    }
+  } catch (error) {
+    await context.answerCallbackQuery({ text: 'Review action failed.' })
+    await context.reply(error instanceof Error ? error.message : 'The review action failed.')
+  }
+}
+
 async function handleScrambleStart(
   database: RallyoDatabase,
   gameRegistry: GameRegistry,
@@ -1165,6 +1586,8 @@ async function handlePlayerCallback(
   database: RallyoDatabase,
   roundService: RoundService,
   walletLinkService: WalletLinkService,
+  socialTaskService: SocialTaskService,
+  gameConfigurations: CommunityGameConfigService,
   context: Context,
   currentTime: Date,
   appBaseUrl?: string,
@@ -1180,9 +1603,47 @@ async function handlePlayerCallback(
     await handleLink(database, walletLinkService, context, appBaseUrl, currentTime)
     return
   }
-  const [, kind, roundId, optionIndexValue] = data.split(':')
+  const [scope, kind, identifier] = data.split(':')
+  if (scope === 'player' && kind === 'task' && identifier && context.from) {
+    const callbackChat = callback.message?.chat
+    if (!callbackChat || (callbackChat.type !== 'group' && callbackChat.type !== 'supergroup')) {
+      await context.answerCallbackQuery({ text: 'Choose tasks inside a community group.' })
+      return
+    }
 
-  if (kind !== 'quick' || !roundId || optionIndexValue === undefined) {
+    const community = await findCommunityByTelegramChatId(database, BigInt(callbackChat.id))
+    if (!community) {
+      await context.answerCallbackQuery({ text: 'Community not found.' })
+      return
+    }
+    if (!(await gameConfigurations.isEnabled(community.id, 'social_tasks'))) {
+      await context.answerCallbackQuery({ text: 'Social tasks are disabled here.' })
+      return
+    }
+
+    try {
+      await socialTaskService.beginSubmissionSession({
+        telegramUserId: BigInt(context.from.id),
+        communityId: community.id,
+        taskId: identifier,
+        now: currentTime,
+      })
+      await context.answerCallbackQuery({ text: 'Task selected.' })
+      await context.reply(
+        'Reply with <code>/task_submit URL-or-reference</code>. This submission step expires soon.',
+        messageOptions(),
+      )
+    } catch (error) {
+      await context.answerCallbackQuery({ text: 'This task is no longer available.' })
+      await context.reply(
+        error instanceof Error ? error.message : 'The task is no longer available.',
+      )
+    }
+    return
+  }
+  const [, quickKind, roundId, optionIndexValue] = data.split(':')
+
+  if (quickKind !== 'quick' || !roundId || optionIndexValue === undefined) {
     await context.answerCallbackQuery({ text: 'This player action is not available yet.' })
     return
   }
@@ -1271,6 +1732,7 @@ async function handleAdminCallback(
   gameConfigurations: CommunityGameConfigService,
   scrambleService: ScrambleService,
   wordSeekService: WordSeekService,
+  socialTaskService: SocialTaskService,
   context: Context,
   currentTime: Date,
   presentRound: () => PresentRound | null,
@@ -1288,6 +1750,36 @@ async function handleAdminCallback(
 
   if (action === 'wordseek_approve') {
     await handleWordSeekApprovalCallback(database, wordSeekService, context, communityId)
+    return
+  }
+
+  if (action === 'task_approve' || action === 'task_reject') {
+    const submission = await socialTaskService.communityForSubmission(communityId)
+    const community = submission ? await findCommunityById(database, submission.communityId) : null
+    if (!community) {
+      await context.answerCallbackQuery({ text: 'Community not found.' })
+      return
+    }
+    if (
+      !(await verifyTelegramAdmin(
+        context,
+        toTelegramApiChatId(community.telegramChatId),
+        context.from.id,
+      ))
+    ) {
+      await context.answerCallbackQuery({ text: 'Admin verification failed.' })
+      return
+    }
+    await rememberVerifiedAdmin(database, context, community.id, currentTime)
+    await handleSocialTaskReviewCallback(
+      database,
+      socialTaskService,
+      context,
+      community.id,
+      communityId,
+      action === 'task_approve' ? 'approve' : 'reject',
+      currentTime,
+    )
     return
   }
 
@@ -1310,6 +1802,37 @@ async function handleAdminCallback(
 
   try {
     if (action === 'select') {
+      await context.reply(
+        await renderAdminMenu(database, community.id, currentTime),
+        messageOptions(adminKeyboard(community.id)),
+      )
+    } else if (action === 'task_review') {
+      await handleTaskReview(
+        database,
+        socialTaskService,
+        gameConfigurations,
+        context,
+        currentTime,
+        community.id,
+      )
+    } else if (action === 'toggle') {
+      const toggleableCapabilities = new Set([
+        'word_seek',
+        'scramble',
+        'social_tasks',
+        'message_activity',
+      ])
+      if (!argument || !toggleableCapabilities.has(argument)) {
+        await context.answerCallbackQuery({ text: 'That capability cannot be changed here.' })
+        return
+      }
+      const current = await gameConfigurations.get(community.id, argument)
+      await gameConfigurations.set({
+        communityId: community.id,
+        gameKey: argument,
+        enabled: !(current?.enabled ?? false),
+        config: current?.config ?? {},
+      })
       await context.reply(
         await renderAdminMenu(database, community.id, currentTime),
         messageOptions(adminKeyboard(community.id)),
@@ -2045,6 +2568,20 @@ async function verifyTelegramAdmin(
   }
 }
 
+async function rememberVerifiedAdmin(
+  database: RallyoDatabase,
+  context: Context,
+  communityId: string,
+  verifiedAt: Date,
+): Promise<void> {
+  if (!context.from) return
+  await recordVerifiedAdmin(database, {
+    communityId,
+    telegramUserId: BigInt(context.from.id),
+    verifiedAt,
+  })
+}
+
 async function renderAdminMenu(
   database: RallyoDatabase,
   communityId: string,
@@ -2102,8 +2639,85 @@ async function renderAdminMenu(
     )
     .limit(1)
   const scrambleStatus = !scrambleConfig?.enabled ? 'Off' : scrambleRound ? 'Live' : 'Ready'
+  const capabilityConfigs = await database
+    .select({
+      gameKey: schema.communityGameConfigs.gameKey,
+      enabled: schema.communityGameConfigs.enabled,
+    })
+    .from(schema.communityGameConfigs)
+    .where(
+      and(
+        eq(schema.communityGameConfigs.communityId, communityId),
+        inArray(schema.communityGameConfigs.gameKey, ['social_tasks', 'message_activity']),
+      ),
+    )
+  const capabilityStatus = (key: string) =>
+    capabilityConfigs.find((config) => config.gameKey === key)?.enabled ? 'On' : 'Off'
 
-  return `<b>${escapeHtml(snapshot.community.title)}</b>\n\nAutomatic rounds · ${snapshot.community.automaticRoundsEnabled ? 'On' : 'Paused'}\nWord Seek · ${wordSeekStatus}\nScramble · ${scrambleStatus}\nNext round · ${nextRound}\nCurrent season · ${season}\nQuestions ready · ${snapshot.readyQuestionCount}`
+  return `<b>${escapeHtml(snapshot.community.title)}</b>\n\nAutomatic rounds · ${snapshot.community.automaticRoundsEnabled ? 'On' : 'Paused'}\nWord Seek · ${wordSeekStatus}\nScramble · ${scrambleStatus}\nSocial tasks · ${capabilityStatus('social_tasks')}\nMessage activity · ${capabilityStatus('message_activity')}\nNext round · ${nextRound}\nCurrent season · ${season}\nQuestions ready · ${snapshot.readyQuestionCount}`
+}
+
+type SocialTaskListRow = typeof schema.socialTasks.$inferSelect
+type PendingSocialTaskRow = {
+  readonly submission: typeof schema.socialTaskSubmissions.$inferSelect
+  readonly task: typeof schema.socialTasks.$inferSelect
+  readonly player: typeof schema.telegramIdentities.$inferSelect
+}
+
+function taskTimeLabel(value: Date): string {
+  return `${value.toISOString().slice(0, 16).replace('T', ' ')} UTC`
+}
+
+function renderSocialTaskList(tasks: readonly SocialTaskListRow[], currentTime: Date): string {
+  return [
+    '<b>COMMUNITY TASKS</b>',
+    '',
+    ...tasks.map((task, index) => {
+      const remainingHours = Math.max(
+        1,
+        Math.ceil((task.endsAt.getTime() - currentTime.getTime()) / 3_600_000),
+      )
+      return `${index + 1}. <b>${escapeHtml(task.title)}</b> · +${task.points} pts\n${escapeHtml(truncateTelegramText(task.instructions, 240))}\nOpen until ${taskTimeLabel(task.endsAt)} · about ${remainingHours}h left`
+    }),
+    '',
+    'Choose a task below, then reply with /task_submit and your URL or reference.',
+  ].join('\n')
+}
+
+function socialTaskListKeyboard(tasks: readonly SocialTaskListRow[]): InlineKeyboard {
+  const keyboard = new InlineKeyboard()
+  tasks.forEach((task, index) => {
+    if (index > 0) keyboard.row()
+    keyboard.text(`Submit · ${truncateTelegramText(task.title, 32)}`, `player:task:${task.id}`)
+  })
+  return keyboard
+}
+
+function renderPendingSocialTasks(rows: readonly PendingSocialTaskRow[]): string {
+  return [
+    '<b>TASK REVIEW</b>',
+    '',
+    ...rows.map((row, index) => {
+      const player = row.player.username ? `@${row.player.username}` : row.player.displayName
+      return `${index + 1}. <b>${escapeHtml(row.task.title)}</b> · +${row.task.points} pts\nPlayer · ${escapeHtml(player)}\nReference · ${escapeHtml(truncateTelegramText(row.submission.reference, 300))}`
+    }),
+    '',
+    'Approve only submissions that meet the task instructions.',
+  ].join('\n')
+}
+
+function pendingSocialTaskKeyboard(rows: readonly PendingSocialTaskRow[]): InlineKeyboard {
+  // The submission id is enough to identify the review. The service resolves its
+  // community, keeping callback_data under Telegram's 64-byte limit in group and
+  // private admin controls.
+  const keyboard = new InlineKeyboard()
+  rows.forEach((row, index) => {
+    if (index > 0) keyboard.row()
+    keyboard
+      .text('Approve', `admin:task_approve:${row.submission.id}`)
+      .text('Reject', `admin:task_reject:${row.submission.id}`)
+  })
+  return keyboard
 }
 
 type WordSeekVocabularyListRow = Pick<
@@ -2172,7 +2786,7 @@ function startMessage(): string {
 }
 
 function helpMessage(): string {
-  return '<b>Rallyo help</b>\n\n/start · player menu\n/me · current score and lifetime XP\n/link · link a Nimiq wallet\nProject Quiz · answer in the community, first correct wins\n/scramble · start Scramble as a community admin\n/scramble_hint · ask for a configured hint\n/scramble_stop · stop Scramble as a community admin\n/wordseek · start Word Seek as a community admin\n/wordseek_add · save a project Word Seek draft\n/wordseek_words · review and approve project Word Seek words\n/settings · community admin controls\n/help · this message'
+  return '<b>Rallyo help</b>\n\n/start · player menu\n/me · current score and lifetime XP\n/link · link a Nimiq wallet\nProject Quiz · answer in the community, first correct wins\n/scramble · start Scramble as a community admin\n/scramble_hint · ask for a configured hint\n/scramble_stop · stop Scramble as a community admin\n/wordseek · start Word Seek as a community admin\n/wordseek_add · save a project Word Seek draft\n/wordseek_words · review and approve project Word Seek words\n/tasks · view enabled community tasks\n/task_submit · submit a task URL or reference\n/task_create · create a task as an admin\n/task_review · review pending task submissions\n/award · award positive points as an admin\n/settings · community admin controls\n/help · this message'
 }
 
 function playerKeyboard(appBaseUrl?: string): InlineKeyboard {
@@ -2200,6 +2814,14 @@ function adminKeyboard(communityId: string): InlineKeyboard {
     .row()
     .text('Project words', `admin:wordseek_words:${communityId}`)
     .text('Questions', `admin:questions:${communityId}`)
+    .row()
+    .text('Review tasks', `admin:task_review:${communityId}`)
+    .text('Toggle tasks', `admin:toggle:${communityId}:social_tasks`)
+    .row()
+    .text('Toggle activity', `admin:toggle:${communityId}:message_activity`)
+    .text('Toggle Word Seek', `admin:toggle:${communityId}:word_seek`)
+    .row()
+    .text('Toggle Scramble', `admin:toggle:${communityId}:scramble`)
     .row()
     .text('Pause rounds', `admin:pause:${communityId}`)
     .row()

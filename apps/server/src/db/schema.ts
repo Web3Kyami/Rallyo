@@ -583,6 +583,30 @@ export const socialTaskSubmissions = pgTable(
   ],
 )
 
+export const socialTaskSubmissionSessions = pgTable(
+  'social_task_submission_sessions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    telegramUserId: bigint('telegram_user_id', { mode: 'bigint' }).notNull(),
+    communityId: uuid('community_id')
+      .notNull()
+      .references(() => communities.id, { onDelete: 'cascade' }),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => socialTasks.id, { onDelete: 'cascade' }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('social_task_submission_sessions_user_community_unique').on(
+      table.telegramUserId,
+      table.communityId,
+    ),
+    index('social_task_submission_sessions_expiry_idx').on(table.expiresAt),
+  ],
+)
+
 export const scoreEvents = pgTable(
   'score_events',
   {

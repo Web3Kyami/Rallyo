@@ -196,6 +196,22 @@ describeDatabase('Phase 7.5A platform contract against PostgreSQL', () => {
         .where(eq(schema.scoreEvents.sourceType, 'SOCIAL_TASK')),
     ).toHaveLength(1)
 
+    const selected = await tasks.beginSubmissionSession({
+      telegramUserId: 700n,
+      communityId: ids.communityOne,
+      taskId: task.id,
+      now,
+    })
+    expect(selected.task.id).toBe(task.id)
+    await expect(
+      tasks.activeSubmissionSession({
+        telegramUserId: 700n,
+        communityId: ids.communityTwo,
+        now,
+      }),
+    ).resolves.toBeNull()
+    await tasks.clearSubmissionSession(700n, ids.communityOne)
+
     const secondSubmission = await tasks.submit({
       taskId: task.id,
       playerId: ids.playerTwo,
@@ -209,6 +225,25 @@ describeDatabase('Phase 7.5A platform contract against PostgreSQL', () => {
         now,
       }),
     ).rejects.toThrow('not authorized')
+
+    const rejected = await tasks.reject({
+      submissionId: secondSubmission.id,
+      reviewerTelegramUserId: 501n,
+      now,
+    })
+    const repeatedRejection = await tasks.reject({
+      submissionId: secondSubmission.id,
+      reviewerTelegramUserId: 501n,
+      now,
+    })
+    expect(rejected.created).toBe(true)
+    expect(repeatedRejection.created).toBe(false)
+    expect(
+      await db
+        .select()
+        .from(schema.scoreEvents)
+        .where(eq(schema.scoreEvents.sourceType, 'SOCIAL_TASK')),
+    ).toHaveLength(1)
   })
 
   it('creates one audited positive manual award and rejects unauthorized awards', async () => {
