@@ -1,0 +1,7 @@
+.agents/
+.codex/
+.rallyo/
+node_modules/
+dist/
+coverage/
+drizzle/meta/

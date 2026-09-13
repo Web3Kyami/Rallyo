@@ -1,0 +1,2558 @@
+import { matchesAcceptedAnswer } from '@rallyo/core'
+import { createRallyoBot } from '@rallyo/telegram'
+import { and, asc, eq, gt, gte, isNull, lte, or } from 'drizzle-orm'
+import { randomUUID } from 'node:crypto'
+import type { Context } from 'grammy'
+import { InlineKeyboard } from 'grammy'
+
+import type { RallyoDatabase } from '../db/client'
+import * as schema from '../db/schema'
+import {
+  claimTelegramUpdate,
+  markTelegramUpdateProcessed,
+  releaseTelegramUpdate,
+} from '../db/telegram-updates'
+import { RoundService } from '../core/round-service'
+import {
+  CommunityGameConfigService,
+  type ProjectQuizConfig,
+} from '../core/community-game-config-service'
+import {
+  GameRegistry,
+  projectQuizCompatibilityModule,
+  scrambleGameModule,
+  wordSeekGameModule,
+} from '../core/game-registry'
+import { ScheduleService } from '../core/schedule-service'
+import { ScheduleWorker } from '../core/schedule-worker'
+import { ScheduledQuizService } from '../core/scheduled-quiz-service'
+import { WalletLinkService } from '../core/wallet-link-service'
+import { ScrambleService, type ScrambleRound } from '../games/scramble/service'
+import { WordSeekService } from '../games/word-seek/service'
+import {
+  renderWordSeekDuplicateGuess,
+  renderWordSeekEnded,
+  renderWordSeekFeedback,
+  renderWordSeekInvalidGuess,
+  renderWordSeekStart,
+  renderWordSeekWinner,
+} from '../games/word-seek/messages'
+import {
+  clearAdminWizardSession,
+  getActiveAdminWizardSession,
+  getAdminWizardSession,
+  saveAdminWizardSession,
+} from './admin-wizard'
+import {
+  communityAdminSnapshot,
+  findCommunityByTelegramChatId,
+  listAdminCommunities,
+  recordVerifiedAdmin,
+  upsertCommunity,
+  upsertTelegramIdentity,
+} from './persistence'
+import {
+  clueNumberAt,
+  renderClueRevealMessage,
+  renderClueRoundAnswered,
+  renderFirstCorrectAnswered,
+  renderProjectQuizAnswered,
+  renderRoundMessage,
+} from './round-messages'
+import {
+  renderScrambleHint,
+  renderScrambleHintUnavailable,
+  renderScrambleNoActive,
+  renderScrambleStart,
+  renderScrambleStopped,
+  renderScrambleTimeout,
+  renderScrambleWinner,
+} from '../games/scramble/messages'
+
+export type TelegramRuntimeOptions = {
+  readonly database: RallyoDatabase
+  readonly token: string
+  readonly appBaseUrl?: string
+  readonly now?: () => Date
+}
+
+type PresentRound = (input: {
+  readonly communityId: string
+  readonly telegramChatId: bigint
+  readonly roundId: string
+  readonly at?: Date
+}) => Promise<unknown>
+
+type PresentWordSeek = (input: {
+  readonly communityId: string
+  readonly telegramChatId: bigint
+  readonly sessionId: string
+}) => Promise<unknown>
+
+type PresentScramble = (input: {
+  readonly communityId: string
+  readonly telegramChatId: bigint
+  readonly roundId: string
+  readonly at?: Date
+}) => Promise<unknown>
+
+export function createTelegramRuntime(options: TelegramRuntimeOptions) {
+  const now = options.now ?? (() => new Date())
+  const gameConfigurations = new CommunityGameConfigService(options.database)
+  const gameRegistry = new GameRegistry(gameConfigurations)
+    .register(projectQuizCompatibilityModule())
+    .register(scrambleGameModule())
+    .register(wordSeekGameModule())
+  const roundService = new RoundService(options.database, gameConfigurations)
+  const scheduleService = new ScheduleService(options.database)
+  const scheduledQuizService = new ScheduledQuizService(options.database)
+  const walletLinkService = new WalletLinkService(options.database)
+  const scrambleService = new ScrambleService(options.database, gameConfigurations)
+  const wordSeekService = new WordSeekService(options.database, gameConfigurations)
+  let presentRoundForAdmin: PresentRound | null = null
+  let presentScrambleForAdmin: PresentScramble | null = null
+  let presentWordSeekForAdmin: PresentWordSeek | null = null
+
+  const bot = createRallyoBot(options.token, {
+    onUpdate: async (updateId, next) => {
+      const telegramUpdateId = BigInt(updateId)
+
+      if (!(await claimTelegramUpdate(options.database, telegramUpdateId))) {
+        return
+      }
+
+      try {
+        await next()
+        await markTelegramUpdateProcessed(options.database, telegramUpdateId)
+      } catch (error) {
+        await releaseTelegramUpdate(options.database, telegramUpdateId)
+        throw error
+      }
+    },
+    onStart: async (context) => {
+      await ensureTelegramPlayer(options.database, context)
+
+      if (isGroupContext(context)) {
+        await ensureCommunityFromContext(options.database, context)
+        await context.reply('Rallyo is installed. Ask a group admin to run /settings in this chat.')
+        return
+      }
+
+      await context.reply(startMessage(), messageOptions(playerKeyboard(options.appBaseUrl)))
+    },
+    onHelp: async (context) => {
+      await context.reply(helpMessage(), messageOptions())
+    },
+    onSettings: async (context) => {
+      await handleSettings(options.database, context, now())
+    },
+    onMe: async (context) => {
+      await handleMe(options.database, roundService, context, now(), options.appBaseUrl)
+    },
+    onLink: async (context) => {
+      await handleLink(options.database, walletLinkService, context, options.appBaseUrl, now())
+    },
+    onWordSeek: async (context) => {
+      await handleWordSeekCommand(
+        options.database,
+        gameRegistry,
+        wordSeekService,
+        context,
+        now(),
+        () => presentWordSeekForAdmin,
+      )
+    },
+    onWordSeekAdd: async (context) => {
+      await handleWordSeekAdd(options.database, wordSeekService, context)
+    },
+    onWordSeekWords: async (context) => {
+      await handleWordSeekWords(options.database, context)
+    },
+    onScrambleStart: async (context) => {
+      await handleScrambleStart(
+        options.database,
+        gameRegistry,
+        scrambleService,
+        context,
+        now(),
+        () => presentScrambleForAdmin,
+      )
+    },
+    onScrambleStop: async (context) => {
+      await handleScrambleStop(options.database, scrambleService, context, now())
+    },
+    onScrambleHint: async (context) => {
+      await handleScrambleHint(options.database, scrambleService, context, now())
+    },
+    onMyChatMember: async (context) => {
+      if (isGroupContext(context) && isActiveBotMembership(context)) {
+        await ensureCommunityFromContext(options.database, context)
+      }
+    },
+    onGroupText: async (context) => {
+      await handleGroupText(options.database, roundService, scrambleService, context, now())
+      if (!isGroupContext(context)) {
+        await handleAdminText(options.database, context, now())
+      } else {
+        await handleWordSeekText(options.database, wordSeekService, context, now())
+      }
+    },
+    onAdminCallback: async (context) => {
+      await handleAdminCallback(
+        options.database,
+        roundService,
+        scheduledQuizService,
+        gameConfigurations,
+        scrambleService,
+        wordSeekService,
+        context,
+        now(),
+        () => presentRoundForAdmin,
+        () => presentScrambleForAdmin,
+        () => presentWordSeekForAdmin,
+      )
+    },
+    onPlayerCallback: async (context) => {
+      await handlePlayerCallback(
+        options.database,
+        roundService,
+        walletLinkService,
+        context,
+        now(),
+        options.appBaseUrl,
+      )
+    },
+  })
+
+  const presentRound = async (input: {
+    readonly communityId: string
+    readonly telegramChatId: bigint
+    readonly roundId: string
+    readonly at?: Date
+  }) => {
+    const round = await roundService.liveRoundForCommunity(input.communityId, input.at ?? now())
+
+    if (!round || round.id !== input.roundId) {
+      throw new Error('Live round could not be loaded for presentation.')
+    }
+
+    if (round.telegramMessageId) {
+      throw new Error('Round already has a Telegram presentation.')
+    }
+
+    const rendered = renderRoundMessage(round, input.at ?? now())
+    const sent = await bot.api.sendMessage(
+      toTelegramApiChatId(input.telegramChatId),
+      rendered.text,
+      {
+        parse_mode: 'HTML',
+        ...(rendered.replyMarkup ? { reply_markup: rendered.replyMarkup } : {}),
+      },
+    )
+    const attached = await roundService.attachTelegramMessageId(round.id, BigInt(sent.message_id))
+
+    if (!attached) {
+      await bot.api.deleteMessage(toTelegramApiChatId(input.telegramChatId), sent.message_id)
+      throw new Error('Round presentation was claimed by another sender.')
+    }
+
+    return sent
+  }
+
+  presentRoundForAdmin = presentRound
+
+  const presentScramble: PresentScramble = async (input) => {
+    const round = await scrambleService.activeRoundForCommunity(
+      input.communityId,
+      input.at ?? now(),
+    )
+
+    if (!round || round.id !== input.roundId) {
+      throw new Error('Live Scramble round could not be loaded for presentation.')
+    }
+
+    if (round.telegramMessageId) {
+      throw new Error('Scramble round already has a Telegram presentation.')
+    }
+
+    const sent = await bot.api.sendMessage(
+      toTelegramApiChatId(input.telegramChatId),
+      renderScrambleStart(round, input.at ?? now()),
+      messageOptions(),
+    )
+    const attached = await scrambleService.attachTelegramMessageId(
+      round.id,
+      BigInt(sent.message_id),
+    )
+
+    if (!attached) {
+      await bot.api.deleteMessage(toTelegramApiChatId(input.telegramChatId), sent.message_id)
+      throw new Error('Scramble presentation was claimed by another sender.')
+    }
+
+    return sent
+  }
+
+  presentScrambleForAdmin = presentScramble
+
+  const presentWordSeek: PresentWordSeek = async (input) => {
+    const session = await wordSeekService.activeSession(input.communityId)
+    const community = await findCommunityById(options.database, input.communityId)
+
+    if (!session || session.id !== input.sessionId || !community) {
+      throw new Error('Live Word Seek round could not be loaded for presentation.')
+    }
+
+    if (session.telegramMessageId !== null) {
+      throw new Error('Word Seek round already has a Telegram presentation.')
+    }
+
+    const sent = await bot.api.sendMessage(
+      toTelegramApiChatId(input.telegramChatId),
+      renderWordSeekStart({
+        communityTitle: community.title,
+        wordLength: session.wordLength,
+        points: session.points,
+        timeoutSeconds: Math.max(
+          1,
+          Math.ceil((session.endsAt.getTime() - session.startsAt.getTime()) / 1_000),
+        ),
+        maxGuesses: session.maxGuesses,
+        clue: session.clue,
+      }),
+      messageOptions(),
+    )
+    const attached = await wordSeekService.attachTelegramMessageId(
+      session.id,
+      BigInt(sent.message_id),
+    )
+
+    if (!attached) {
+      await bot.api.deleteMessage(toTelegramApiChatId(input.telegramChatId), sent.message_id)
+      throw new Error('Word Seek presentation was claimed by another sender.')
+    }
+
+    return sent
+  }
+
+  presentWordSeekForAdmin = presentWordSeek
+
+  const scheduleWorker = new ScheduleWorker(scheduleService, async ({ schedule, now: runAt }) => {
+    if (schedule.kind !== 'SCHEDULED_QUIZ') {
+      throw new Error(`Unsupported schedule kind: ${schedule.kind}`)
+    }
+
+    const quizId = payloadString(schedule.payload, 'quizId')
+    const sequence = payloadPositiveInteger(schedule.payload, 'sequence')
+    if (!quizId || !sequence) throw new Error('Scheduled quiz payload is invalid.')
+
+    const community = await findCommunityById(options.database, schedule.communityId)
+    if (!community) throw new Error('Scheduled quiz community no longer exists.')
+    const projectQuizConfiguration = await gameConfigurations.getProjectQuizConfig(community.id)
+    if (
+      !community.automaticRoundsEnabled ||
+      !projectQuizConfiguration.config.automaticRounds ||
+      !(await gameConfigurations.isEnabled(community.id, 'project_quiz'))
+    ) {
+      return {
+        nextRunAt: new Date(runAt.getTime() + 60_000),
+        payload: { quizId, sequence },
+      }
+    }
+
+    const next = await scheduledQuizService.nextQuestion(quizId, sequence)
+    if (!next || !next.quiz.seasonId) {
+      await scheduledQuizService.markComplete(quizId)
+      return { enabled: false }
+    }
+
+    const locksAt = new Date(runAt.getTime() + next.quiz.perQuestionSeconds * 1_000)
+    const round = await roundService.startLiveRound({
+      communityId: schedule.communityId,
+      seasonId: next.quiz.seasonId,
+      quizId: next.quiz.id,
+      questionId: next.questionId,
+      startsAt: runAt,
+      locksAt,
+      now: runAt,
+    })
+    await scheduledQuizService.markLive(next.quiz.id)
+    await presentRound({
+      communityId: community.id,
+      telegramChatId: community.telegramChatId,
+      roundId: round.id,
+      at: runAt,
+    })
+
+    return {
+      nextRunAt: locksAt,
+      payload: { quizId, sequence: sequence + 1 },
+    }
+  })
+
+  return {
+    bot,
+    roundService,
+    scrambleService,
+    wordSeekService,
+    startScheduleWorker: () => scheduleWorker.start(),
+    startClueRevealScheduler: () => startClueRevealScheduler(bot, roundService),
+    startScrambleScheduler: () => startScrambleScheduler(bot, scrambleService),
+    startWordSeekTimeoutScheduler: () =>
+      startWordSeekTimeoutScheduler(bot, wordSeekService, options.database),
+    presentRound,
+    presentScramble,
+    presentWordSeek,
+  }
+}
+
+export async function processClueRevealTick(
+  bot: ReturnType<typeof createRallyoBot>,
+  roundService: RoundService,
+  currentTime: Date,
+): Promise<void> {
+  const rounds = await roundService.clueRoundsForReveal(currentTime)
+
+  for (const round of rounds) {
+    const clueNumber = clueNumberAt(round, currentTime)
+    if (clueNumber <= round.clueNumberPresented || round.telegramMessageId === null) continue
+
+    try {
+      await bot.api.sendMessage(
+        toTelegramApiChatId(round.telegramChatId),
+        renderClueRevealMessage(round, clueNumber as 2 | 3).text,
+        messageOptions(),
+      )
+      await roundService.markClueNumberPresented(round.id, clueNumber)
+    } catch {
+      // Leave the persisted clue number unchanged so the next tick retries the edit.
+    }
+  }
+}
+
+function startClueRevealScheduler(
+  bot: ReturnType<typeof createRallyoBot>,
+  roundService: RoundService,
+) {
+  let stopped = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const tick = async () => {
+    if (stopped) return
+
+    try {
+      await processClueRevealTick(bot, roundService, new Date())
+    } finally {
+      if (!stopped) timer = setTimeout(() => void tick(), 1_000)
+    }
+  }
+
+  void tick()
+  return () => {
+    stopped = true
+    if (timer) clearTimeout(timer)
+  }
+}
+
+export async function processWordSeekTimeoutTick(
+  bot: ReturnType<typeof createRallyoBot>,
+  wordSeekService: WordSeekService,
+  database: RallyoDatabase,
+  currentTime: Date,
+): Promise<void> {
+  const expired = await wordSeekService.expireDueSessions(currentTime)
+
+  for (const session of expired) {
+    const community = await findCommunityById(database, session.communityId)
+    if (!community) continue
+
+    try {
+      await bot.api.sendMessage(
+        toTelegramApiChatId(community.telegramChatId),
+        renderWordSeekEnded({
+          communityTitle: community.title,
+          word: session.targetWord,
+          reason: 'TIMEOUT',
+        }),
+        messageOptions(),
+      )
+    } catch {
+      // The session is already durably closed. A Telegram failure must not
+      // reopen it or create another scoring path.
+    }
+  }
+}
+
+function startWordSeekTimeoutScheduler(
+  bot: ReturnType<typeof createRallyoBot>,
+  wordSeekService: WordSeekService,
+  database: RallyoDatabase,
+) {
+  let stopped = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const tick = async () => {
+    if (stopped) return
+    try {
+      await processWordSeekTimeoutTick(bot, wordSeekService, database, new Date())
+    } finally {
+      if (!stopped) timer = setTimeout(() => void tick(), 1_000)
+    }
+  }
+
+  void tick()
+  return () => {
+    stopped = true
+    if (timer) clearTimeout(timer)
+  }
+}
+
+export async function processScrambleTick(
+  bot: ReturnType<typeof createRallyoBot>,
+  scrambleService: ScrambleService,
+  currentTime: Date,
+): Promise<void> {
+  await scrambleService.expireDueRounds(currentTime)
+
+  for (const pending of await scrambleService.pendingPresentationRounds()) {
+    try {
+      const sent = await bot.api.sendMessage(
+        toTelegramApiChatId(pending.telegramChatId),
+        renderScrambleStart(pending.round, currentTime),
+        messageOptions(),
+      )
+      const attached = await scrambleService.attachTelegramMessageId(
+        pending.round.id,
+        BigInt(sent.message_id),
+      )
+      if (!attached) {
+        await bot.api.deleteMessage(toTelegramApiChatId(pending.telegramChatId), sent.message_id)
+      }
+    } catch {
+      // A persisted live round remains recoverable on the next tick.
+    }
+  }
+
+  for (const pending of await scrambleService.pendingOutcomeRounds()) {
+    const text =
+      pending.round.status === 'WON'
+        ? renderScrambleWinner({
+            round: pending.round,
+            winner: pending.winnerDisplayName ?? 'A player',
+          })
+        : pending.round.status === 'STOPPED'
+          ? renderScrambleStopped(pending.round)
+          : renderScrambleTimeout(pending.round)
+
+    try {
+      if (pending.round.telegramMessageId !== null) {
+        try {
+          await bot.api.editMessageText(
+            toTelegramApiChatId(pending.telegramChatId),
+            toTelegramMessageId(pending.round.telegramMessageId),
+            text,
+            messageOptions(),
+          )
+        } catch {
+          await bot.api.sendMessage(
+            toTelegramApiChatId(pending.telegramChatId),
+            text,
+            messageOptions(),
+          )
+        }
+      } else {
+        await bot.api.sendMessage(
+          toTelegramApiChatId(pending.telegramChatId),
+          text,
+          messageOptions(),
+        )
+      }
+      await scrambleService.markOutcomeNotified(pending.round.id, currentTime)
+    } catch {
+      // Leave the notification pending so a later tick can retry it.
+    }
+  }
+}
+
+function startScrambleScheduler(
+  bot: ReturnType<typeof createRallyoBot>,
+  scrambleService: ScrambleService,
+) {
+  let stopped = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const tick = async () => {
+    if (stopped) return
+    try {
+      await processScrambleTick(bot, scrambleService, new Date())
+    } finally {
+      if (!stopped) timer = setTimeout(() => void tick(), 1_000)
+    }
+  }
+
+  void tick()
+  return () => {
+    stopped = true
+    if (timer) clearTimeout(timer)
+  }
+}
+
+async function handleGroupText(
+  database: RallyoDatabase,
+  roundService: RoundService,
+  scrambleService: ScrambleService,
+  context: Context,
+  currentTime: Date,
+): Promise<void> {
+  if (!isGroupContext(context) || !context.from || !context.message?.text) {
+    return
+  }
+
+  const community = await findCommunityByTelegramChatId(database, BigInt(context.chat.id))
+
+  if (!community) {
+    return
+  }
+
+  if (!context.message.text.trimStart().startsWith('/')) {
+    const scrambleRound = await scrambleService.activeRoundForCommunity(community.id, currentTime)
+    if (scrambleRound) {
+      const { playerId } = await ensureTelegramPlayer(database, context)
+      const result = await scrambleService.submitGuess({
+        telegramUpdateId: BigInt(context.update.update_id),
+        telegramInputId: `chat:${context.chat.id}:message:${context.message.message_id}`,
+        roundId: scrambleRound.id,
+        playerId,
+        rawAnswer: context.message.text,
+        now: currentTime,
+        updateAlreadyClaimed: true,
+      })
+
+      if (result.status === 'WON') {
+        const winner = context.from.username
+          ? `@${context.from.username}`
+          : [context.from.first_name, context.from.last_name].filter(Boolean).join(' ') ||
+            'A player'
+        const resultMessage = renderScrambleWinner({ round: result.round, winner })
+        if (scrambleRound.telegramMessageId !== null) {
+          try {
+            await context.api.editMessageText(
+              context.chat.id,
+              toTelegramMessageId(scrambleRound.telegramMessageId),
+              resultMessage,
+              messageOptions(),
+            )
+            await scrambleService.markOutcomeNotified(result.round.id, currentTime)
+            return
+          } catch {
+            // Fall back to a compact reply if Telegram cannot edit the challenge.
+          }
+        }
+        await context.reply(resultMessage, messageOptions())
+        await scrambleService.markOutcomeNotified(result.round.id, currentTime)
+      } else if (result.status === 'TIMEOUT') {
+        await context.reply(renderScrambleTimeout(result.round), messageOptions())
+        await scrambleService.markOutcomeNotified(result.round.id, currentTime)
+      }
+      return
+    }
+  }
+
+  const round = await roundService.liveRoundForCommunity(community.id, currentTime)
+
+  if (!round) {
+    const lockedRound = await roundService.lockedRoundForCommunity(community.id, currentTime)
+
+    if (
+      lockedRound &&
+      roundPresentation(lockedRound) === 'typed' &&
+      matchesAcceptedAnswer(context.message.text, lockedRound.acceptedAnswers)
+    ) {
+      await context.reply('Round already answered.')
+    }
+    return
+  }
+
+  if (roundPresentation(round) !== 'typed') {
+    return
+  }
+
+  const { playerId } = await ensureTelegramPlayer(database, context)
+  const telegramInputId = `chat:${context.chat.id}:message:${context.message.message_id}`
+
+  const clueNumber = clueNumberAt(round, currentTime)
+  const result = await roundService.claimProjectQuizAnswer({
+    telegramUpdateId: BigInt(context.update.update_id),
+    telegramInputId,
+    roundId: round.id,
+    playerId,
+    rawAnswer: context.message.text,
+    clueNumber,
+    now: currentTime,
+    updateAlreadyClaimed: true,
+  })
+
+  if (result.status === 'WON') {
+    const winner = context.from.username
+      ? `@${context.from.username}`
+      : [context.from.first_name, context.from.last_name].filter(Boolean).join(' ') || 'A player'
+    const rank = await roundService.rankForPlayerInSeason(community.id, round.seasonId, playerId)
+    const resultMessage = round.presentation
+      ? renderProjectQuizAnswered({
+          prompt: round.prompt,
+          answer: context.message.text,
+          winner,
+          points: result.points,
+          rank,
+        })
+      : round.mode === 'CLUE'
+        ? renderClueRoundAnswered({
+            prompt: round.prompt,
+            answer: context.message.text,
+            clueNumber,
+            points: result.points,
+          })
+        : renderFirstCorrectAnswered({
+            prompt: round.prompt,
+            answer: context.message.text,
+            winner,
+            points: result.points,
+          })
+
+    if (round.telegramMessageId !== null) {
+      try {
+        await context.api.editMessageText(
+          context.chat.id,
+          toTelegramMessageId(round.telegramMessageId),
+          resultMessage,
+          messageOptions(),
+        )
+        return
+      } catch {
+        // Fall back to a compact reply if the original message can no longer be edited.
+      }
+    }
+
+    await context.reply(resultMessage, messageOptions())
+  } else if (
+    result.status === 'ROUND_CLOSED' &&
+    matchesAcceptedAnswer(context.message.text, round.acceptedAnswers) &&
+    (await roundService.lockedRoundForCommunity(community.id, currentTime))
+  ) {
+    await context.reply('Round already answered.')
+  }
+}
+
+async function handleWordSeekText(
+  database: RallyoDatabase,
+  wordSeekService: WordSeekService,
+  context: Context,
+  currentTime: Date,
+): Promise<void> {
+  if (!isGroupContext(context) || !context.from || !context.message?.text) return
+  if (context.message.text.trimStart().startsWith('/')) return
+
+  const community = await findCommunityByTelegramChatId(database, BigInt(context.chat.id))
+  if (!community) return
+
+  const session = await wordSeekService.activeSession(community.id)
+  if (!session) return
+
+  const { playerId } = await ensureTelegramPlayer(database, context)
+  const result = await wordSeekService.submitGuess({
+    communityId: community.id,
+    playerId,
+    telegramUpdateId: BigInt(context.update.update_id),
+    telegramInputId: `chat:${context.chat.id}:message:${context.message.message_id}`,
+    rawGuess: context.message.text,
+    now: currentTime,
+    updateAlreadyClaimed: true,
+  })
+
+  if (result.status === 'FEEDBACK') {
+    await context.reply(
+      renderWordSeekFeedback({
+        feedback: result.feedback,
+        guessesUsed: result.guessesUsed,
+        maxGuesses: result.maxGuesses,
+      }),
+      messageOptions(),
+    )
+  } else if (result.status === 'WON') {
+    const winner = context.from.username
+      ? `@${context.from.username}`
+      : [context.from.first_name, context.from.last_name].filter(Boolean).join(' ') || 'A player'
+    await context.reply(
+      renderWordSeekWinner({
+        communityTitle: community.title,
+        word: result.word,
+        winner,
+        points: result.points,
+        guessesUsed: result.guessesUsed,
+      }),
+      messageOptions(),
+    )
+  } else if (result.status === 'TIMED_OUT' || result.status === 'MAX_GUESSES') {
+    await context.reply(
+      renderWordSeekEnded({
+        communityTitle: community.title,
+        word: result.word,
+        reason: result.status === 'MAX_GUESSES' ? 'MAX_GUESSES' : 'TIMEOUT',
+      }),
+      messageOptions(),
+    )
+  } else if (result.status === 'DUPLICATE_GUESS') {
+    await context.reply(renderWordSeekDuplicateGuess(), messageOptions())
+  } else if (result.status === 'INVALID_LENGTH' || result.status === 'INVALID_WORD') {
+    await context.reply(
+      renderWordSeekInvalidGuess({
+        wordLength: result.wordLength,
+        hasCorrectLength: result.status === 'INVALID_LENGTH',
+      }),
+      messageOptions(),
+    )
+  }
+}
+
+async function handleWordSeekCommand(
+  database: RallyoDatabase,
+  gameRegistry: GameRegistry,
+  wordSeekService: WordSeekService,
+  context: Context,
+  currentTime: Date,
+  presentWordSeek: () => PresentWordSeek | null,
+): Promise<void> {
+  if (!isGroupContext(context) || !context.from) {
+    await context.reply('Start Word Seek from a community group administrator account.')
+    return
+  }
+
+  if (!(await verifyTelegramAdmin(context, context.chat.id, context.from.id))) {
+    await context.reply('Only a verified community administrator can start Word Seek.')
+    return
+  }
+
+  const community = await ensureCommunityFromContext(database, context)
+  try {
+    await gameRegistry.canStart({
+      gameKey: 'word_seek',
+      communityId: community.id,
+      now: currentTime,
+      config: {},
+    })
+  } catch (error) {
+    await context.reply(error instanceof Error ? error.message : 'Word Seek is disabled.')
+    return
+  }
+
+  try {
+    const season = await activeSeasonForCommunity(database, community.id, currentTime)
+    const presenter = presentWordSeek()
+    if (!season || !presenter) {
+      await context.reply('Word Seek needs an active season before it can start.')
+      return
+    }
+
+    const session = await wordSeekService.start({
+      communityId: community.id,
+      seasonId: season.id,
+      startsAt: currentTime,
+      now: currentTime,
+    })
+    await presenter({
+      communityId: community.id,
+      telegramChatId: community.telegramChatId,
+      sessionId: session.id,
+    })
+    await context.reply('Word Seek is live in this community.')
+  } catch (error) {
+    await context.reply(error instanceof Error ? error.message : 'Word Seek could not start.')
+  }
+}
+
+async function handleWordSeekAdd(
+  database: RallyoDatabase,
+  wordSeekService: WordSeekService,
+  context: Context,
+): Promise<void> {
+  if (!isGroupContext(context) || !context.from) {
+    await context.reply('Add project Word Seek words inside the community group.')
+    return
+  }
+
+  if (!(await verifyTelegramAdmin(context, context.chat.id, context.from.id))) {
+    await context.reply('Only a verified community admin can add project Word Seek words.')
+    return
+  }
+
+  const rawArguments = (context.message?.text ?? '')
+    .replace(/^\/wordseek_add(?:@\w+)?\s*/iu, '')
+    .trim()
+  const separator = rawArguments.indexOf('|')
+  const word = (separator === -1 ? rawArguments : rawArguments.slice(0, separator)).trim()
+  const clue = separator === -1 ? undefined : rawArguments.slice(separator + 1).trim()
+
+  if (!word) {
+    await context.reply('Usage: /wordseek_add WORD | optional clue')
+    return
+  }
+  if (clue && clue.length > 500) {
+    await context.reply('The optional clue must be 500 characters or fewer.')
+    return
+  }
+
+  const community = await ensureCommunityFromContext(database, context)
+  try {
+    const created = await wordSeekService.createProjectWord({
+      communityId: community.id,
+      word,
+      ...(clue ? { clue } : {}),
+    })
+    await context.reply(
+      `Draft saved: <b>${escapeHtml(created.word)}</b>\nApprove it from /wordseek_words.`,
+      messageOptions(),
+    )
+  } catch (error) {
+    await context.reply(
+      error instanceof Error ? error.message : 'The project word could not be saved.',
+    )
+  }
+}
+
+async function handleWordSeekWords(database: RallyoDatabase, context: Context): Promise<void> {
+  if (!isGroupContext(context) || !context.from) {
+    await context.reply('View project Word Seek words inside the community group.')
+    return
+  }
+
+  if (!(await verifyTelegramAdmin(context, context.chat.id, context.from.id))) {
+    await context.reply('Only a verified community admin can view project Word Seek words.')
+    return
+  }
+
+  const community = await ensureCommunityFromContext(database, context)
+  const vocabulary = await renderWordSeekVocabulary(database, community.id)
+  await context.reply(vocabulary.text, messageOptions(vocabulary.keyboard))
+}
+
+async function handleWordSeekApprovalCallback(
+  database: RallyoDatabase,
+  wordSeekService: WordSeekService,
+  context: Context,
+  wordId: string,
+): Promise<void> {
+  const [word] = await database
+    .select({
+      id: schema.wordSeekWords.id,
+      communityId: schema.wordSeekWords.communityId,
+      word: schema.wordSeekWords.word,
+    })
+    .from(schema.wordSeekWords)
+    .where(eq(schema.wordSeekWords.id, wordId))
+    .limit(1)
+
+  if (!word) {
+    await context.answerCallbackQuery({ text: 'Project word not found.' })
+    return
+  }
+
+  const community = await findCommunityById(database, word.communityId)
+  if (!community || !context.from) {
+    await context.answerCallbackQuery({ text: 'Community not found.' })
+    return
+  }
+
+  if (
+    !(await verifyTelegramAdmin(
+      context,
+      toTelegramApiChatId(community.telegramChatId),
+      context.from.id,
+    ))
+  ) {
+    await context.answerCallbackQuery({ text: 'Admin verification failed.' })
+    return
+  }
+
+  try {
+    const approved = await wordSeekService.approveProjectWord(word.id, community.id)
+    await context.reply(
+      `Approved project word: <b>${escapeHtml(approved.word)}</b>.`,
+      messageOptions(),
+    )
+    const vocabulary = await renderWordSeekVocabulary(database, community.id)
+    await context.reply(vocabulary.text, messageOptions(vocabulary.keyboard))
+    await context.answerCallbackQuery({ text: 'Project word approved.' })
+  } catch (error) {
+    await context.answerCallbackQuery({ text: 'Project word was not approved.' })
+    await context.reply(
+      error instanceof Error ? error.message : 'The project word was not approved.',
+    )
+  }
+}
+
+async function handleScrambleStart(
+  database: RallyoDatabase,
+  gameRegistry: GameRegistry,
+  scrambleService: ScrambleService,
+  context: Context,
+  currentTime: Date,
+  presentRound: () => PresentScramble | null,
+): Promise<void> {
+  if (!isGroupContext(context) || !context.from) {
+    await context.reply('Start Scramble inside the community group.')
+    return
+  }
+
+  const community = await ensureCommunityFromContext(database, context)
+  if (!(await verifyTelegramAdmin(context, context.chat.id, context.from.id))) {
+    await context.reply('Only a verified community admin can start Scramble.')
+    return
+  }
+
+  try {
+    await gameRegistry.canStart({
+      gameKey: 'scramble',
+      communityId: community.id,
+      now: currentTime,
+      config: {},
+    })
+    const season = await activeSeasonForCommunity(database, community.id, currentTime)
+    const presenter = presentRound()
+    if (!season || !presenter) {
+      await context.reply('Scramble needs an active season before it can start.')
+      return
+    }
+    const round = await scrambleService.startRound({
+      communityId: community.id,
+      seasonId: season.id,
+      now: currentTime,
+    })
+    await presenter({
+      communityId: community.id,
+      telegramChatId: community.telegramChatId,
+      roundId: round.id,
+      at: currentTime,
+    })
+    await context.reply('Scramble is live. Reply with the unscrambled term.')
+  } catch (error) {
+    await context.reply(error instanceof Error ? error.message : 'Scramble could not start.')
+  }
+}
+
+async function handleScrambleStop(
+  database: RallyoDatabase,
+  scrambleService: ScrambleService,
+  context: Context,
+  currentTime: Date,
+): Promise<void> {
+  if (!isGroupContext(context) || !context.from) {
+    await context.reply('Stop Scramble inside the community group.')
+    return
+  }
+
+  const community = await findCommunityByTelegramChatId(database, BigInt(context.chat.id))
+  if (!community || !(await verifyTelegramAdmin(context, context.chat.id, context.from.id))) {
+    await context.reply('Only a verified community admin can stop Scramble.')
+    return
+  }
+
+  const round = await scrambleService.stopRound(community.id, currentTime)
+  if (!round) {
+    await context.reply(renderScrambleNoActive())
+    return
+  }
+
+  await announceScrambleOutcome(
+    context,
+    scrambleService,
+    round,
+    renderScrambleStopped(round),
+    currentTime,
+  )
+}
+
+async function handleScrambleHint(
+  database: RallyoDatabase,
+  scrambleService: ScrambleService,
+  context: Context,
+  currentTime: Date,
+): Promise<void> {
+  if (!isGroupContext(context)) {
+    await context.reply('Ask for a Scramble hint inside the community group.')
+    return
+  }
+
+  const community = await findCommunityByTelegramChatId(database, BigInt(context.chat.id))
+  const round = community
+    ? await scrambleService.activeRoundForCommunity(community.id, currentTime)
+    : null
+  if (!round) {
+    await context.reply(renderScrambleNoActive())
+    return
+  }
+
+  const result = await scrambleService.requestHint({ roundId: round.id, now: currentTime })
+  if (result.status === 'HINT') {
+    await context.reply(
+      renderScrambleHint({
+        hint: result.hint,
+        hintNumber: result.round.hintCount,
+        maxHints: result.round.maxHints,
+        pointsRemaining: result.pointsRemaining,
+      }),
+      messageOptions(),
+    )
+  } else if (result.status === 'NOT_READY') {
+    const seconds = Math.max(
+      1,
+      Math.ceil((result.availableAt.getTime() - currentTime.getTime()) / 1_000),
+    )
+    await context.reply(
+      renderScrambleHintUnavailable(`The next hint is ready in ${seconds} sec.`),
+      messageOptions(),
+    )
+  } else if (result.status === 'DISABLED') {
+    await context.reply(
+      renderScrambleHintUnavailable('Hints are disabled for this community.'),
+      messageOptions(),
+    )
+  } else if (result.status === 'MAX_HINTS') {
+    await context.reply(
+      renderScrambleHintUnavailable('All configured hints have been revealed.'),
+      messageOptions(),
+    )
+  } else if (result.status === 'TIMEOUT') {
+    await context.reply(renderScrambleTimeout(result.round), messageOptions())
+    await scrambleService.markOutcomeNotified(result.round.id, currentTime)
+  }
+}
+
+async function announceScrambleOutcome(
+  context: Context,
+  scrambleService: ScrambleService,
+  round: ScrambleRound,
+  text: string,
+  currentTime: Date,
+): Promise<void> {
+  if (round.telegramMessageId !== null && context.chat) {
+    try {
+      await context.api.editMessageText(
+        context.chat.id,
+        toTelegramMessageId(round.telegramMessageId),
+        text,
+        messageOptions(),
+      )
+      await scrambleService.markOutcomeNotified(round.id, currentTime)
+      return
+    } catch {
+      // Fall back to a new message if the challenge was already edited or removed.
+    }
+  }
+  await context.reply(text, messageOptions())
+  await scrambleService.markOutcomeNotified(round.id, currentTime)
+}
+
+function roundPresentation(round: {
+  readonly presentation: string | null
+  readonly mode: (typeof schema.questionMode.enumValues)[number]
+}): 'typed' | 'multiple_choice' {
+  if (round.presentation === 'multiple_choice') return 'multiple_choice'
+  if (round.presentation === 'typed') return 'typed'
+  return round.mode === 'QUICK' ? 'multiple_choice' : 'typed'
+}
+
+async function handlePlayerCallback(
+  database: RallyoDatabase,
+  roundService: RoundService,
+  walletLinkService: WalletLinkService,
+  context: Context,
+  currentTime: Date,
+  appBaseUrl?: string,
+): Promise<void> {
+  const callback = context.callbackQuery
+  if (!callback) {
+    return
+  }
+
+  const data = callback.data ?? ''
+  if (data === 'player:link') {
+    await context.answerCallbackQuery()
+    await handleLink(database, walletLinkService, context, appBaseUrl, currentTime)
+    return
+  }
+  const [, kind, roundId, optionIndexValue] = data.split(':')
+
+  if (kind !== 'quick' || !roundId || optionIndexValue === undefined) {
+    await context.answerCallbackQuery({ text: 'This player action is not available yet.' })
+    return
+  }
+
+  const optionIndex = Number(optionIndexValue)
+  const callbackChat = callback.message?.chat
+
+  if (
+    !Number.isSafeInteger(optionIndex) ||
+    optionIndex < 0 ||
+    !callbackChat ||
+    (callbackChat.type !== 'group' && callbackChat.type !== 'supergroup') ||
+    !context.from
+  ) {
+    await context.answerCallbackQuery({ text: 'This answer is no longer available.' })
+    return
+  }
+
+  const community = await findCommunityByTelegramChatId(database, BigInt(callbackChat.id))
+  const round = community
+    ? await roundService.liveRoundForCommunity(community.id, currentTime)
+    : null
+  const option = round?.id === roundId ? round.options?.[optionIndex] : undefined
+
+  if (!round || roundPresentation(round) !== 'multiple_choice' || !option || !callback.id) {
+    await context.answerCallbackQuery({ text: 'This round is closed.' })
+    return
+  }
+
+  const { playerId } = await ensureTelegramPlayer(database, context)
+  const result = await roundService.submitQuickQuizAnswer({
+    telegramUpdateId: BigInt(context.update.update_id),
+    telegramInputId: `callback:${callback.id}`,
+    roundId,
+    playerId,
+    rawAnswer: option.value,
+    now: currentTime,
+    updateAlreadyClaimed: true,
+  })
+
+  const feedback =
+    result.status === 'ACCEPTED'
+      ? `+${result.points} pts`
+      : result.status === 'WRONG'
+        ? 'Answer recorded'
+        : result.status === 'DUPLICATE_ANSWER'
+          ? 'You already answered'
+          : 'This round is closed'
+
+  if (result.status === 'ACCEPTED' && round.presentation && context.from) {
+    const winner = context.from.username
+      ? `@${context.from.username}`
+      : [context.from.first_name, context.from.last_name].filter(Boolean).join(' ') || 'A player'
+    const rank = await roundService.rankForPlayerInSeason(community!.id, round.seasonId, playerId)
+    const resultMessage = renderProjectQuizAnswered({
+      prompt: round.prompt,
+      answer: option.value,
+      winner,
+      points: result.points,
+      rank,
+    })
+
+    if (callback.message) {
+      try {
+        await context.api.editMessageText(
+          callback.message.chat.id,
+          callback.message.message_id,
+          resultMessage,
+          messageOptions(),
+        )
+      } catch {
+        await context.reply(resultMessage, messageOptions())
+      }
+    } else {
+      await context.reply(resultMessage, messageOptions())
+    }
+  }
+
+  await context.answerCallbackQuery({ text: feedback })
+}
+
+async function handleAdminCallback(
+  database: RallyoDatabase,
+  roundService: RoundService,
+  scheduledQuizService: ScheduledQuizService,
+  gameConfigurations: CommunityGameConfigService,
+  scrambleService: ScrambleService,
+  wordSeekService: WordSeekService,
+  context: Context,
+  currentTime: Date,
+  presentRound: () => PresentRound | null,
+  presentScramble: () => PresentScramble | null,
+  presentWordSeek: () => PresentWordSeek | null,
+): Promise<void> {
+  const callback = context.callbackQuery
+  if (!callback || !context.from) return
+
+  const [, action, communityId, argument] = (callback.data ?? '').split(':')
+  if (!communityId || !action) {
+    await context.answerCallbackQuery({ text: 'This admin action is unavailable.' })
+    return
+  }
+
+  if (action === 'wordseek_approve') {
+    await handleWordSeekApprovalCallback(database, wordSeekService, context, communityId)
+    return
+  }
+
+  const community = await findCommunityById(database, communityId)
+  if (!community) {
+    await context.answerCallbackQuery({ text: 'Community not found.' })
+    return
+  }
+
+  if (
+    !(await verifyTelegramAdmin(
+      context,
+      toTelegramApiChatId(community.telegramChatId),
+      context.from.id,
+    ))
+  ) {
+    await context.answerCallbackQuery({ text: 'Admin verification failed.' })
+    return
+  }
+
+  try {
+    if (action === 'select') {
+      await context.reply(
+        await renderAdminMenu(database, community.id, currentTime),
+        messageOptions(adminKeyboard(community.id)),
+      )
+    } else if (action === 'run') {
+      const season = await activeSeasonForCommunity(database, community.id, currentTime)
+      const projectQuizConfiguration = await gameConfigurations.getProjectQuizConfig(community.id)
+      const question = await firstApprovedQuestion(
+        database,
+        community.id,
+        projectQuizConfiguration.config.contentSource,
+      )
+      const presenter = presentRound()
+      if (!season || !question || !presenter) {
+        await context.reply('Run now needs an active season and at least one approved question.')
+      } else {
+        const round = await roundService.startLiveRound({
+          communityId: community.id,
+          seasonId: season.id,
+          questionId: question.id,
+          startsAt: currentTime,
+          now: currentTime,
+        })
+        await presenter({
+          communityId: community.id,
+          telegramChatId: community.telegramChatId,
+          roundId: round.id,
+          at: currentTime,
+        })
+        await context.reply('Project Quiz is live in the community.')
+      }
+    } else if (action === 'scramble_start') {
+      const season = await activeSeasonForCommunity(database, community.id, currentTime)
+      const presenter = presentScramble()
+      if (!season || !presenter) {
+        await context.reply('Scramble needs an active season before it can start.')
+      } else {
+        const round = await scrambleService.startRound({
+          communityId: community.id,
+          seasonId: season.id,
+          now: currentTime,
+        })
+        await presenter({
+          communityId: community.id,
+          telegramChatId: community.telegramChatId,
+          roundId: round.id,
+          at: currentTime,
+        })
+        await context.reply('Scramble is live in the community.')
+      }
+    } else if (action === 'scramble_stop') {
+      const ended = await scrambleService.stopRound(community.id, currentTime)
+      if (!ended) {
+        await context.reply(renderScrambleNoActive())
+      } else {
+        await context.api.sendMessage(
+          toTelegramApiChatId(community.telegramChatId),
+          renderScrambleStopped(ended),
+          messageOptions(),
+        )
+        await scrambleService.markOutcomeNotified(ended.id, currentTime)
+        await context.reply('Scramble stopped in the community.')
+      }
+    } else if (action === 'wordseek') {
+      const season = await activeSeasonForCommunity(database, community.id, currentTime)
+      const presenter = presentWordSeek()
+      if (!season || !presenter) {
+        await context.reply('Word Seek needs an active season before it can start.')
+      } else {
+        const session = await wordSeekService.start({
+          communityId: community.id,
+          seasonId: season.id,
+          startsAt: currentTime,
+          now: currentTime,
+        })
+        await presenter({
+          communityId: community.id,
+          telegramChatId: community.telegramChatId,
+          sessionId: session.id,
+        })
+        await context.reply('Word Seek is live in the community.')
+      }
+    } else if (action === 'wordseekend') {
+      const ended = await wordSeekService.endSession({
+        communityId: community.id,
+        now: currentTime,
+      })
+      if (!ended) {
+        await context.reply('There is no active Word Seek round in this community.')
+      } else {
+        await context.api.sendMessage(
+          toTelegramApiChatId(community.telegramChatId),
+          renderWordSeekEnded({
+            communityTitle: community.title,
+            word: ended.targetWord,
+            reason: 'ADMIN',
+          }),
+          messageOptions(),
+        )
+        await context.reply('Word Seek ended in the community.')
+      }
+    } else if (action === 'wordseek_words') {
+      const vocabulary = await renderWordSeekVocabulary(database, community.id)
+      await context.reply(vocabulary.text, messageOptions(vocabulary.keyboard))
+    } else if (action === 'schedule') {
+      await saveAdminWizardSession(database, {
+        telegramUserId: BigInt(context.from.id),
+        communityId: community.id,
+        state: 'SOURCE',
+        now: currentTime,
+      })
+      await context.reply(
+        'SCHEDULE QUIZ\n\nChoose the question source.',
+        messageOptions(sourceKeyboard(community.id)),
+      )
+    } else if (action === 'source') {
+      const active = await getAdminWizardSession(
+        database,
+        BigInt(context.from.id),
+        community.id,
+        currentTime,
+      )
+      if (!active || active.state !== 'SOURCE') {
+        await context.answerCallbackQuery({
+          text: 'This setup step is closed. Start Schedule again.',
+        })
+        return
+      }
+      await saveAdminWizardSession(database, {
+        telegramUserId: BigInt(context.from.id),
+        communityId: community.id,
+        state: 'QUESTION_COUNT',
+        data: { sourcePolicy: argument === 'default' ? 'DEFAULT' : 'MANUAL' },
+        now: currentTime,
+      })
+      await context.reply(
+        'How many questions? Reply with any whole number from 1 to 10.',
+        messageOptions(questionCountKeyboard(community.id)),
+      )
+    } else if (action === 'count') {
+      await context.answerCallbackQuery({
+        text: 'Reply with a whole number from 1 to 10.',
+      })
+      return
+    } else if (action === 'pick' && argument) {
+      const session = await getAdminWizardSession(
+        database,
+        BigInt(context.from.id),
+        community.id,
+        currentTime,
+      )
+      if (!session || session.state !== 'QUESTION_SELECT') {
+        await context.answerCallbackQuery({ text: 'This question selection is closed.' })
+        return
+      }
+      const page = numberValue(session.data.questionPage) ?? 0
+      const selected = arrayOfStrings(session.data.selectedQuestionIds)
+      const questions = await eligibleQuestionsForCommunity(database, community.id, currentTime)
+      if (!questions.some((question) => question.id === argument)) {
+        await context.answerCallbackQuery({ text: 'That question is no longer eligible.' })
+        return
+      }
+      const nextSelected = selected.includes(argument)
+        ? selected.filter((id) => id !== argument)
+        : [...selected, argument]
+      await saveAdminWizardSession(database, {
+        telegramUserId: BigInt(context.from.id),
+        communityId: community.id,
+        state: 'QUESTION_SELECT',
+        data: { ...session.data, selectedQuestionIds: nextSelected },
+        now: currentTime,
+      })
+      await context.editMessageText(
+        renderQuestionSelection(
+          questions,
+          page,
+          numberValue(session.data.questionCount) ?? 1,
+          nextSelected,
+        ),
+        messageOptions(
+          questionSelectionKeyboard(
+            community.id,
+            questions,
+            page,
+            nextSelected,
+            numberValue(session.data.questionCount) ?? 1,
+          ),
+        ),
+      )
+    } else if (action === 'pickpage' && argument) {
+      const session = await getAdminWizardSession(
+        database,
+        BigInt(context.from.id),
+        community.id,
+        currentTime,
+      )
+      if (!session || session.state !== 'QUESTION_SELECT') {
+        await context.answerCallbackQuery({ text: 'This question selection is closed.' })
+        return
+      }
+      const questions = await eligibleQuestionsForCommunity(database, community.id, currentTime)
+      const page = Math.max(0, Number(argument))
+      const selected = arrayOfStrings(session.data.selectedQuestionIds)
+      await context.editMessageText(
+        renderQuestionSelection(
+          questions,
+          page,
+          numberValue(session.data.questionCount) ?? 1,
+          selected,
+        ),
+        messageOptions(
+          questionSelectionKeyboard(
+            community.id,
+            questions,
+            page,
+            selected,
+            numberValue(session.data.questionCount) ?? 1,
+          ),
+        ),
+      )
+    } else if (action === 'pickdone') {
+      const session = await getAdminWizardSession(
+        database,
+        BigInt(context.from.id),
+        community.id,
+        currentTime,
+      )
+      if (!session || session.state !== 'QUESTION_SELECT') {
+        await context.answerCallbackQuery({ text: 'This question selection is closed.' })
+        return
+      }
+      const selected = arrayOfStrings(session.data.selectedQuestionIds)
+      const expected = numberValue(session.data.questionCount)
+      if (!expected || selected.length !== expected) {
+        await context.answerCallbackQuery({
+          text: `Select exactly ${expected ?? 'the requested number'} questions.`,
+        })
+        return
+      }
+      await saveAdminWizardSession(database, {
+        telegramUserId: BigInt(context.from.id),
+        communityId: community.id,
+        state: 'DURATION',
+        data: { ...session.data, questionIds: selected },
+        now: currentTime,
+      })
+      await context.reply('Time per question?', messageOptions(durationKeyboard(community.id)))
+    } else if (action === 'duration' && argument) {
+      const seconds = Number(argument)
+      const session = await getAdminWizardSession(
+        database,
+        BigInt(context.from.id),
+        community.id,
+        currentTime,
+      )
+      if (!session || session.state !== 'DURATION') {
+        await context.answerCallbackQuery({
+          text: 'This setup step is closed. Start Schedule again.',
+        })
+        return
+      }
+      await saveAdminWizardSession(database, {
+        telegramUserId: BigInt(context.from.id),
+        communityId: community.id,
+        state: 'POINTS',
+        data: { ...(session?.data ?? {}), perQuestionSeconds: seconds },
+        now: currentTime,
+      })
+      await context.reply(
+        'Choose the points profile.',
+        messageOptions(pointsKeyboard(community.id)),
+      )
+    } else if (action === 'points') {
+      const session = await getAdminWizardSession(
+        database,
+        BigInt(context.from.id),
+        community.id,
+        currentTime,
+      )
+      if (!session || session.state !== 'POINTS') {
+        await context.answerCallbackQuery({
+          text: 'This setup step is closed. Start Schedule again.',
+        })
+        return
+      }
+      await saveAdminWizardSession(database, {
+        telegramUserId: BigInt(context.from.id),
+        communityId: community.id,
+        state: 'CONFIRM',
+        data: { ...(session?.data ?? {}), pointsProfile: 'DEFAULT' },
+        now: currentTime,
+      })
+      await context.reply(
+        renderScheduleSummary({ ...(session?.data ?? {}), pointsProfile: 'DEFAULT' }),
+        messageOptions(confirmKeyboard(community.id)),
+      )
+    } else if (action === 'confirm') {
+      const session = await getAdminWizardSession(
+        database,
+        BigInt(context.from.id),
+        community.id,
+        currentTime,
+      )
+      const data = session?.data ?? {}
+      if (!session || session.state !== 'CONFIRM') {
+        await context.answerCallbackQuery({
+          text: 'This setup step is closed. Start Schedule again.',
+        })
+        return
+      }
+      const questionIds = arrayOfStrings(data.questionIds)
+      const questionCount = numberValue(data.questionCount)
+      const perQuestionSeconds = numberValue(data.perQuestionSeconds)
+      const season = await activeSeasonForCommunity(
+        database,
+        community.id,
+        new Date(currentTime.getTime() + 60_000),
+      )
+      if (!season || !session || questionIds.length !== questionCount || !perQuestionSeconds) {
+        await context.reply('This setup expired or is incomplete. Start Schedule again.')
+      } else {
+        const created = await scheduledQuizService.create({
+          communityId: community.id,
+          seasonId: season.id,
+          name: 'Telegram scheduled quiz',
+          sourcePolicy: stringValue(data.sourcePolicy) ?? 'MANUAL',
+          startsAt: new Date(currentTime.getTime() + 60_000),
+          perQuestionSeconds,
+          questionIds,
+        })
+        await clearAdminWizardSession(database, BigInt(context.from.id), community.id)
+        await context.reply(
+          `Scheduled ${questionIds.length} question${questionIds.length === 1 ? '' : 's'} for ${new Date(currentTime.getTime() + 60_000).toISOString()}.\n<code>${created.quiz.id}</code>`,
+          messageOptions(),
+        )
+      }
+    } else if (action === 'cancel') {
+      await clearAdminWizardSession(database, BigInt(context.from.id), community.id)
+      await context.reply('Schedule cancelled.')
+    } else if (action === 'questions') {
+      await saveAdminWizardSession(database, {
+        telegramUserId: BigInt(context.from.id),
+        communityId: community.id,
+        state: 'MANUAL_QUESTION',
+        now: currentTime,
+      })
+      await context.reply(
+        'CREATE QUESTION\n\nMCQ|Prompt|Correct option|Option A|Option B|...\nFREE|Prompt|Correct answer|alias1,alias2\n\nReply /cancel to stop.',
+        messageOptions(cancelOnlyKeyboard(community.id)),
+      )
+    } else if (action === 'pause') {
+      await database
+        .update(schema.communities)
+        .set({ automaticRoundsEnabled: !community.automaticRoundsEnabled })
+        .where(eq(schema.communities.id, community.id))
+      await context.reply(
+        await renderAdminMenu(database, community.id, currentTime),
+        messageOptions(adminKeyboard(community.id)),
+      )
+    } else if (action === 'refresh') {
+      await context.reply(
+        await renderAdminMenu(database, community.id, currentTime),
+        messageOptions(adminKeyboard(community.id)),
+      )
+    } else {
+      await context.answerCallbackQuery({ text: 'This admin action is unavailable.' })
+      return
+    }
+    await context.answerCallbackQuery({ text: 'Done' })
+  } catch (error) {
+    await context.answerCallbackQuery({ text: 'Action failed.' })
+    await context.reply(error instanceof Error ? error.message : 'The admin action failed.')
+  }
+}
+
+async function handleAdminText(
+  database: RallyoDatabase,
+  context: Context,
+  currentTime: Date,
+): Promise<void> {
+  if (!context.from || !context.message?.text) return
+  const session = await getActiveAdminWizardSession(database, BigInt(context.from.id), currentTime)
+  if (!session) return
+  const community = await findCommunityById(database, session.communityId)
+  if (!community) return
+
+  if (
+    !(await verifyTelegramAdmin(
+      context,
+      toTelegramApiChatId(community.telegramChatId),
+      context.from.id,
+    ))
+  ) {
+    await clearAdminWizardSession(database, BigInt(context.from.id), community.id)
+    await context.reply('Admin verification failed. Start /settings again.')
+    return
+  }
+
+  const text = context.message.text.trim()
+  if (text.toLowerCase() === '/cancel' || text.toLowerCase() === 'cancel') {
+    await clearAdminWizardSession(database, BigInt(context.from.id), community.id)
+    await context.reply('Setup cancelled. Nothing was scheduled or created.')
+    return
+  }
+
+  if (session.state === 'QUESTION_COUNT') {
+    const count = Number(text)
+    if (!Number.isSafeInteger(count) || count < 1 || count > 10) {
+      await context.reply('Reply with a whole number from 1 to 10. You can also tap Cancel.')
+      return
+    }
+    const eligible = await eligibleQuestionsForCommunity(database, community.id, currentTime)
+    if (eligible.length < count) {
+      await context.reply(
+        `Only ${eligible.length} eligible approved question${eligible.length === 1 ? '' : 's'} are available after cooldown. Reply with a smaller number or /cancel.`,
+      )
+      return
+    }
+    if (session.data.sourcePolicy === 'DEFAULT') {
+      const questionIds = eligible.slice(0, count).map((question) => question.id)
+      await saveAdminWizardSession(database, {
+        telegramUserId: BigInt(context.from.id),
+        communityId: community.id,
+        state: 'DURATION',
+        data: { ...session.data, questionIds, questionCount: count },
+        now: currentTime,
+      })
+      await context.reply('Time per question?', messageOptions(durationKeyboard(community.id)))
+      return
+    }
+    await saveAdminWizardSession(database, {
+      telegramUserId: BigInt(context.from.id),
+      communityId: community.id,
+      state: 'QUESTION_SELECT',
+      data: { ...session.data, questionCount: count, questionPage: 0, selectedQuestionIds: [] },
+      now: currentTime,
+    })
+    await context.reply(
+      renderQuestionSelection(eligible, 0, count, []),
+      messageOptions(questionSelectionKeyboard(community.id, eligible, 0, [], count)),
+    )
+  } else if (session.state === 'QUESTION_IDS') {
+    const ids = context.message.text
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean)
+    const expected = numberValue(session.data.questionCount)
+    if (!expected || ids.length !== expected || ids.some((id) => !uuidLike(id))) {
+      await context.reply(
+        `Send exactly ${expected ?? 'the requested number of'} valid question UUIDs separated by commas.`,
+      )
+      return
+    }
+    await saveAdminWizardSession(database, {
+      telegramUserId: BigInt(context.from.id),
+      communityId: community.id,
+      state: 'DURATION',
+      data: { ...session.data, questionIds: ids },
+      now: currentTime,
+    })
+    await context.reply('Time per question?', messageOptions(durationKeyboard(community.id)))
+  } else if (session.state === 'MANUAL_QUESTION') {
+    const question = parseManualQuestion(context.message.text, community.id)
+    if (!question) {
+      await context.reply(
+        'Invalid format. Use MCQ|Prompt|Correct option|Option A|Option B|... or FREE|Prompt|Correct answer|alias1,alias2',
+      )
+      return
+    }
+    const [created] = await database
+      .insert(schema.questions)
+      .values(question)
+      .returning({ id: schema.questions.id })
+    await clearAdminWizardSession(database, BigInt(context.from.id), community.id)
+    await context.reply(
+      `Approved question created. UUID: <code>${created?.id ?? 'unknown'}</code>`,
+      messageOptions(),
+    )
+  }
+}
+
+async function handleSettings(
+  database: RallyoDatabase,
+  context: Context,
+  currentTime: Date,
+): Promise<void> {
+  if (!context.from) {
+    return
+  }
+
+  if (isGroupContext(context)) {
+    const community = await ensureCommunityFromContext(database, context)
+    const isAdmin = await verifyTelegramAdmin(context, context.chat.id, context.from.id)
+
+    if (!isAdmin) {
+      await context.reply(
+        'ADMIN ACCESS REQUIRED\n\nOnly a verified Telegram group administrator can open community controls.',
+      )
+      return
+    }
+
+    await recordVerifiedAdmin(database, {
+      communityId: community.id,
+      telegramUserId: BigInt(context.from.id),
+      verifiedAt: currentTime,
+    })
+
+    try {
+      await context.api.sendMessage(
+        context.from.id,
+        await renderAdminMenu(database, community.id, currentTime),
+        messageOptions(adminKeyboard(community.id)),
+      )
+      await context.reply('Community controls are ready in your private chat.')
+    } catch {
+      await context.reply(
+        'I COULD NOT OPEN PRIVATE CONTROLS\n\nStart a private chat with Rallyo first, then run /settings again here.',
+      )
+    }
+    return
+  }
+
+  const chatIdArgument = commandArguments(context)[0]
+
+  if (!chatIdArgument) {
+    const communities = await listAdminCommunities(database, BigInt(context.from.id))
+
+    if (communities.length === 0) {
+      await context.reply(
+        'NO VERIFIED COMMUNITIES\n\nRun /settings in a Telegram group where you are an administrator, then return here.',
+      )
+      return
+    }
+
+    if (communities.length === 1 && communities[0]) {
+      const community = await findCommunityById(database, communities[0].id)
+      if (community) {
+        await context.reply(
+          await renderAdminMenu(database, community.id, currentTime),
+          messageOptions(adminKeyboard(community.id)),
+        )
+        return
+      }
+    }
+
+    await context.reply(
+      '<b>YOUR COMMUNITIES</b>\n\nChoose a community to manage.',
+      messageOptions(communitySelectionKeyboard(communities)),
+    )
+    return
+  }
+
+  const targetChatId = parseTelegramChatId(chatIdArgument)
+
+  if (targetChatId === null) {
+    await context.reply(
+      'SETTINGS\n\nUse a numeric Telegram chat id, for example <code>/settings -1001234567890</code>.',
+      messageOptions(),
+    )
+    return
+  }
+
+  const community = await findCommunityByTelegramChatId(database, targetChatId)
+
+  if (!community) {
+    await context.reply(
+      'COMMUNITY NOT FOUND\n\nRun /settings in the target Telegram group once the bot has been added.',
+    )
+    return
+  }
+
+  const isAdmin = await verifyTelegramAdmin(
+    context,
+    toTelegramApiChatId(targetChatId),
+    context.from.id,
+  )
+
+  if (!isAdmin) {
+    await context.reply(
+      'ADMIN ACCESS REQUIRED\n\nYour Telegram administrator status could not be verified for this community.',
+    )
+    return
+  }
+
+  await recordVerifiedAdmin(database, {
+    communityId: community.id,
+    telegramUserId: BigInt(context.from.id),
+    verifiedAt: currentTime,
+  })
+  await context.reply(
+    await renderAdminMenu(database, community.id, currentTime),
+    messageOptions(adminKeyboard(community.id)),
+  )
+}
+
+async function handleMe(
+  database: RallyoDatabase,
+  roundService: RoundService,
+  context: Context,
+  currentTime: Date,
+  appBaseUrl?: string,
+): Promise<void> {
+  if (!context.from) return
+
+  const { playerId } = await ensureTelegramPlayer(database, context)
+  const lifetimeXp = await roundService.lifetimeXpForPlayer(playerId)
+  const activeSeasons = await database
+    .select({ id: schema.seasons.id, communityId: schema.seasons.communityId })
+    .from(schema.seasons)
+    .where(
+      and(
+        eq(schema.seasons.status, 'ACTIVE'),
+        lte(schema.seasons.startsAt, currentTime),
+        gt(schema.seasons.endsAt, currentTime),
+      ),
+    )
+    .limit(1)
+  const activeSeason = activeSeasons[0]
+  const communityRows = await database
+    .select({ communityId: schema.scoreEvents.communityId })
+    .from(schema.scoreEvents)
+    .where(eq(schema.scoreEvents.playerId, playerId))
+  const scoredCommunityCount = new Set(communityRows.map((row) => row.communityId)).size
+
+  let weeklyMessage = 'No active season is running yet.'
+
+  if (activeSeason) {
+    const leaderboard = await roundService.leaderboardForSeason(
+      activeSeason.communityId,
+      activeSeason.id,
+    )
+    const playerRow = leaderboard.find((row) => row.playerId === playerId)
+    weeklyMessage = playerRow
+      ? `#${playerRow.rank} · ${playerRow.points} pts`
+      : 'No completed rounds yet.'
+  }
+
+  const [wallet] = await database
+    .select({ id: schema.walletIdentities.id })
+    .from(schema.walletIdentities)
+    .where(
+      and(
+        eq(schema.walletIdentities.playerId, playerId),
+        isNull(schema.walletIdentities.revokedAt),
+      ),
+    )
+    .limit(1)
+
+  const walletMessage = wallet
+    ? '<b>NIMIQ LINKED</b>'
+    : '<b>NIMIQ NOT LINKED</b>\n\nYou can keep playing without a wallet. Linking is required only for wallet-backed identity and rewards.'
+
+  await context.reply(
+    `<b>THIS WEEK</b>\n\n${weeklyMessage}\n\nLifetime XP · ${lifetimeXp}\nScored communities · ${scoredCommunityCount}\n\n${walletMessage}`,
+    messageOptions(playerKeyboard(appBaseUrl)),
+  )
+}
+
+async function ensureTelegramPlayer(database: RallyoDatabase, context: Context) {
+  if (!context.from) {
+    throw new Error('Telegram update has no user identity.')
+  }
+
+  return upsertTelegramIdentity(database, {
+    telegramUserId: BigInt(context.from.id),
+    username: context.from.username ?? null,
+    displayName:
+      [context.from.first_name, context.from.last_name].filter(Boolean).join(' ') ||
+      context.from.username ||
+      'Telegram player',
+  })
+}
+
+async function handleLink(
+  database: RallyoDatabase,
+  walletLinkService: WalletLinkService,
+  context: Context,
+  appBaseUrl: string | undefined,
+  currentTime: Date,
+): Promise<void> {
+  if (!context.from || context.chat?.type !== 'private') {
+    await context.reply('Open a private chat with Rallyo and send /link to connect a wallet.')
+    return
+  }
+  const { telegramIdentityId } = await ensureTelegramPlayer(database, context)
+  const issued = await walletLinkService.issueCode({ telegramIdentityId, now: currentTime })
+  const link = appBaseUrl
+    ? `${appBaseUrl.replace(/\/$/, '')}/?link=${encodeURIComponent(issued.code)}`
+    : null
+  await context.reply(
+    link
+      ? `<b>WALLET LINK CODE</b>\n\nOpen Player HQ:\n${escapeHtml(link)}\n\nThis code expires in 10 minutes and can be used once.`
+      : `<b>WALLET LINK CODE</b>\n\n<code>${issued.code}</code>\n\nThis code expires in 10 minutes and can be used once.`,
+    messageOptions(),
+  )
+}
+
+async function ensureCommunityFromContext(database: RallyoDatabase, context: Context) {
+  if (!isGroupContext(context)) {
+    throw new Error('Community installation requires a group context.')
+  }
+
+  return upsertCommunity(database, {
+    telegramChatId: BigInt(context.chat.id),
+    title: context.chat.title,
+  })
+}
+
+async function findCommunityById(database: RallyoDatabase, communityId: string) {
+  const [community] = await database
+    .select({
+      id: schema.communities.id,
+      telegramChatId: schema.communities.telegramChatId,
+      title: schema.communities.title,
+      status: schema.communities.status,
+      automaticRoundsEnabled: schema.communities.automaticRoundsEnabled,
+    })
+    .from(schema.communities)
+    .where(eq(schema.communities.id, communityId))
+  return community ?? null
+}
+
+async function verifyTelegramAdmin(
+  context: Context,
+  chatId: number,
+  userId: number,
+): Promise<boolean> {
+  try {
+    const member = await context.api.getChatMember(chatId, userId)
+    return member.status === 'administrator' || member.status === 'creator'
+  } catch {
+    return false
+  }
+}
+
+async function renderAdminMenu(
+  database: RallyoDatabase,
+  communityId: string,
+  currentTime: Date,
+): Promise<string> {
+  const snapshot = await communityAdminSnapshot(database, communityId, currentTime)
+
+  if (!snapshot) {
+    throw new Error('Community disappeared while rendering admin menu.')
+  }
+
+  const nextRound = snapshot.nextRoundAt
+    ? snapshot.nextRoundAt.toISOString().slice(11, 16)
+    : 'Not scheduled'
+  const season = snapshot.currentSeason ? escapeHtml(snapshot.currentSeason) : 'No active season'
+  const [wordSeekConfig] = await database
+    .select({ enabled: schema.communityGameConfigs.enabled })
+    .from(schema.communityGameConfigs)
+    .where(
+      and(
+        eq(schema.communityGameConfigs.communityId, communityId),
+        eq(schema.communityGameConfigs.gameKey, 'word_seek'),
+      ),
+    )
+    .limit(1)
+  const [wordSeekSession] = await database
+    .select({ id: schema.wordSeekSessions.id })
+    .from(schema.wordSeekSessions)
+    .where(
+      and(
+        eq(schema.wordSeekSessions.communityId, communityId),
+        eq(schema.wordSeekSessions.status, 'LIVE'),
+      ),
+    )
+    .limit(1)
+  const wordSeekStatus = !wordSeekConfig?.enabled ? 'Off' : wordSeekSession ? 'Live' : 'Ready'
+  const [scrambleConfig] = await database
+    .select({ enabled: schema.communityGameConfigs.enabled })
+    .from(schema.communityGameConfigs)
+    .where(
+      and(
+        eq(schema.communityGameConfigs.communityId, communityId),
+        eq(schema.communityGameConfigs.gameKey, 'scramble'),
+      ),
+    )
+    .limit(1)
+  const [scrambleRound] = await database
+    .select({ id: schema.scrambleRounds.id })
+    .from(schema.scrambleRounds)
+    .where(
+      and(
+        eq(schema.scrambleRounds.communityId, communityId),
+        eq(schema.scrambleRounds.status, 'LIVE'),
+      ),
+    )
+    .limit(1)
+  const scrambleStatus = !scrambleConfig?.enabled ? 'Off' : scrambleRound ? 'Live' : 'Ready'
+
+  return `<b>${escapeHtml(snapshot.community.title)}</b>\n\nAutomatic rounds · ${snapshot.community.automaticRoundsEnabled ? 'On' : 'Paused'}\nWord Seek · ${wordSeekStatus}\nScramble · ${scrambleStatus}\nNext round · ${nextRound}\nCurrent season · ${season}\nQuestions ready · ${snapshot.readyQuestionCount}`
+}
+
+type WordSeekVocabularyListRow = Pick<
+  typeof schema.wordSeekWords.$inferSelect,
+  'id' | 'word' | 'wordLength' | 'clue' | 'status'
+>
+
+async function renderWordSeekVocabulary(
+  database: RallyoDatabase,
+  communityId: string,
+): Promise<{ readonly text: string; readonly keyboard: InlineKeyboard }> {
+  const rows = await database
+    .select({
+      id: schema.wordSeekWords.id,
+      word: schema.wordSeekWords.word,
+      wordLength: schema.wordSeekWords.wordLength,
+      clue: schema.wordSeekWords.clue,
+      status: schema.wordSeekWords.status,
+    })
+    .from(schema.wordSeekWords)
+    .where(eq(schema.wordSeekWords.communityId, communityId))
+    .orderBy(asc(schema.wordSeekWords.wordLength), asc(schema.wordSeekWords.word))
+
+  const text = rows.length
+    ? [
+        '<b>WORD SEEK PROJECT WORDS</b>',
+        '',
+        ...rows.map((row) => {
+          const status = row.status === 'APPROVED' ? 'Approved' : 'Draft'
+          const clue = row.clue ? ` · ${escapeHtml(row.clue)}` : ''
+          return `${status} · <code>${escapeHtml(row.word)}</code> · ${row.wordLength} letters${clue}`
+        }),
+        '',
+        'Add a draft with /wordseek_add WORD | optional clue.',
+        'Approve drafts with the buttons below.',
+      ].join('\n')
+    : '<b>WORD SEEK PROJECT WORDS</b>\n\nNo project vocabulary yet.\n\nAdd one with /wordseek_add WORD | optional clue.'
+
+  return {
+    text,
+    keyboard: wordSeekVocabularyKeyboard(communityId, rows),
+  }
+}
+
+function wordSeekVocabularyKeyboard(
+  communityId: string,
+  rows: readonly WordSeekVocabularyListRow[],
+): InlineKeyboard {
+  const keyboard = new InlineKeyboard()
+  let draftCount = 0
+
+  for (const row of rows) {
+    if (row.status !== 'DRAFT') continue
+    if (draftCount > 0) keyboard.row()
+    keyboard.text(`Approve ${row.word}`, `admin:wordseek_approve:${row.id}`)
+    draftCount += 1
+  }
+
+  if (draftCount > 0) keyboard.row()
+  keyboard.text('Refresh', `admin:wordseek_words:${communityId}`)
+  return keyboard
+}
+
+function startMessage(): string {
+  return '<b>Welcome.</b>\n\nPlay inside your communities. Your score follows you here.'
+}
+
+function helpMessage(): string {
+  return '<b>Rallyo help</b>\n\n/start · player menu\n/me · current score and lifetime XP\n/link · link a Nimiq wallet\nProject Quiz · answer in the community, first correct wins\n/scramble · start Scramble as a community admin\n/scramble_hint · ask for a configured hint\n/scramble_stop · stop Scramble as a community admin\n/wordseek · start Word Seek as a community admin\n/wordseek_add · save a project Word Seek draft\n/wordseek_words · review and approve project Word Seek words\n/settings · community admin controls\n/help · this message'
+}
+
+function playerKeyboard(appBaseUrl?: string): InlineKeyboard {
+  const keyboard = new InlineKeyboard()
+    .text('My score', 'player:me')
+    .text('Link Nimiq', 'player:link')
+
+  if (appBaseUrl) {
+    keyboard.row().url('Open Player HQ', appBaseUrl)
+  }
+
+  return keyboard
+}
+
+function adminKeyboard(communityId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('Run Project Quiz', `admin:run:${communityId}`)
+    .text('Start Word Seek', `admin:wordseek:${communityId}`)
+    .row()
+    .text('Start Scramble', `admin:scramble_start:${communityId}`)
+    .text('Schedule', `admin:schedule:${communityId}`)
+    .row()
+    .text('Stop Word Seek', `admin:wordseekend:${communityId}`)
+    .text('Stop Scramble', `admin:scramble_stop:${communityId}`)
+    .row()
+    .text('Project words', `admin:wordseek_words:${communityId}`)
+    .text('Questions', `admin:questions:${communityId}`)
+    .row()
+    .text('Pause rounds', `admin:pause:${communityId}`)
+    .row()
+    .text('Refresh status', `admin:refresh:${communityId}`)
+}
+
+function communitySelectionKeyboard(
+  communities: readonly { readonly id: string; readonly title: string }[],
+): InlineKeyboard {
+  const keyboard = new InlineKeyboard()
+  communities.forEach((community, index) => {
+    if (index > 0) keyboard.row()
+    keyboard.text(community.title, `admin:select:${community.id}`)
+  })
+  return keyboard
+}
+
+function sourceKeyboard(communityId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('Approved manual/project', `admin:source:${communityId}:manual`)
+    .row()
+    .text('Curated defaults', `admin:source:${communityId}:default`)
+    .row()
+    .text('Cancel', `admin:cancel:${communityId}`)
+}
+
+function questionCountKeyboard(communityId: string): InlineKeyboard {
+  return new InlineKeyboard().text('Cancel', `admin:cancel:${communityId}`)
+}
+
+function durationKeyboard(communityId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('20 sec', `admin:duration:${communityId}:20`)
+    .text('30 sec', `admin:duration:${communityId}:30`)
+    .text('60 sec', `admin:duration:${communityId}:60`)
+    .row()
+    .text('Cancel', `admin:cancel:${communityId}`)
+}
+
+function pointsKeyboard(communityId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('Default points', `admin:points:${communityId}:default`)
+    .row()
+    .text('Cancel', `admin:cancel:${communityId}`)
+}
+
+function confirmKeyboard(communityId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('Confirm', `admin:confirm:${communityId}`)
+    .text('Cancel', `admin:cancel:${communityId}`)
+}
+
+function cancelOnlyKeyboard(communityId: string): InlineKeyboard {
+  return new InlineKeyboard().text('Cancel', `admin:cancel:${communityId}`)
+}
+
+type SelectableQuestion = {
+  readonly id: string
+  readonly prompt: string
+  readonly category: string
+}
+
+function renderQuestionSelection(
+  questions: readonly SelectableQuestion[],
+  page: number,
+  count: number,
+  selectedIds: readonly string[],
+): string {
+  const totalPages = Math.max(1, Math.ceil(questions.length / 5))
+  const currentPage = Math.min(Math.max(0, page), totalPages - 1)
+  return `<b>SELECT QUESTIONS</b>\n\nChoose ${count} approved question${count === 1 ? '' : 's'} by topic/text.\nSelected · ${selectedIds.length}/${count}\nPage ${currentPage + 1}/${totalPages}`
+}
+
+function questionSelectionKeyboard(
+  communityId: string,
+  questions: readonly SelectableQuestion[],
+  page: number,
+  selectedIds: readonly string[],
+  count: number,
+): InlineKeyboard {
+  const pageSize = 5
+  const totalPages = Math.max(1, Math.ceil(questions.length / pageSize))
+  const currentPage = Math.min(Math.max(0, page), totalPages - 1)
+  const keyboard = new InlineKeyboard()
+  questions.slice(currentPage * pageSize, (currentPage + 1) * pageSize).forEach((question) => {
+    const marker = selectedIds.includes(question.id) ? '✅ ' : ''
+    const label = `${marker}${truncateTelegramText(question.prompt, 45)}`
+    keyboard.text(label, `admin:pick:${communityId}:${question.id}`).row()
+  })
+  if (totalPages > 1) {
+    if (currentPage > 0)
+      keyboard.text('← Previous', `admin:pickpage:${communityId}:${currentPage - 1}`)
+    if (currentPage < totalPages - 1)
+      keyboard.text('Next →', `admin:pickpage:${communityId}:${currentPage + 1}`)
+    keyboard.row()
+  }
+  keyboard.text(`Done (${selectedIds.length}/${count})`, `admin:pickdone:${communityId}`).row()
+  keyboard.text('Cancel', `admin:cancel:${communityId}`)
+  return keyboard
+}
+
+function truncateTelegramText(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, ' ').trim()
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized
+}
+
+async function eligibleQuestionsForCommunity(
+  database: RallyoDatabase,
+  communityId: string,
+  now: Date,
+): Promise<SelectableQuestion[]> {
+  const [community] = await database
+    .select({ questionCooldownDays: schema.communities.questionCooldownDays })
+    .from(schema.communities)
+    .where(eq(schema.communities.id, communityId))
+  const cutoff = new Date(now.getTime() - (community?.questionCooldownDays ?? 30) * 86_400_000)
+  const questions = await database
+    .select({
+      id: schema.questions.id,
+      prompt: schema.questions.prompt,
+      category: schema.questions.category,
+      createdAt: schema.questions.createdAt,
+    })
+    .from(schema.questions)
+    .where(
+      and(
+        eq(schema.questions.status, 'APPROVED'),
+        or(
+          eq(schema.questions.scope, 'GLOBAL'),
+          and(
+            eq(schema.questions.scope, 'COMMUNITY'),
+            eq(schema.questions.communityId, communityId),
+          ),
+        ),
+      ),
+    )
+    .orderBy(schema.questions.createdAt)
+  const used = await database
+    .select({ questionId: schema.questionUsages.questionId })
+    .from(schema.questionUsages)
+    .where(
+      and(
+        eq(schema.questionUsages.communityId, communityId),
+        gte(schema.questionUsages.usedAt, cutoff),
+      ),
+    )
+  const usedIds = new Set(used.map((row) => row.questionId))
+  return questions.filter((question) => !usedIds.has(question.id))
+}
+
+async function activeSeasonForCommunity(database: RallyoDatabase, communityId: string, at: Date) {
+  const [season] = await database
+    .select()
+    .from(schema.seasons)
+    .where(
+      and(
+        eq(schema.seasons.communityId, communityId),
+        eq(schema.seasons.status, 'ACTIVE'),
+        lte(schema.seasons.startsAt, at),
+        gt(schema.seasons.endsAt, at),
+      ),
+    )
+    .orderBy(schema.seasons.startsAt)
+    .limit(1)
+  return season ?? null
+}
+
+async function firstApprovedQuestion(
+  database: RallyoDatabase,
+  communityId: string,
+  contentSource: ProjectQuizConfig['contentSource'] = 'ANY_APPROVED',
+) {
+  const [question] = await database
+    .select({ id: schema.questions.id })
+    .from(schema.questions)
+    .where(
+      and(
+        eq(schema.questions.status, 'APPROVED'),
+        projectQuizSourceCondition(contentSource),
+        or(
+          eq(schema.questions.scope, 'GLOBAL'),
+          and(
+            eq(schema.questions.scope, 'COMMUNITY'),
+            eq(schema.questions.communityId, communityId),
+          ),
+        ),
+      ),
+    )
+    .orderBy(schema.questions.createdAt)
+    .limit(1)
+  return question ?? null
+}
+
+function projectQuizSourceCondition(contentSource: ProjectQuizConfig['contentSource']) {
+  switch (contentSource) {
+    case 'PROJECT_BRAIN':
+      return eq(schema.questions.source, 'PROJECT_AI')
+    case 'CURATED_DEFAULT':
+      return eq(schema.questions.source, 'DEFAULT')
+    case 'MANUAL':
+      return eq(schema.questions.source, 'MANUAL')
+    case 'ANY_APPROVED':
+      return or(
+        eq(schema.questions.source, 'DEFAULT'),
+        eq(schema.questions.source, 'PROJECT_AI'),
+        eq(schema.questions.source, 'MANUAL'),
+      )
+  }
+}
+
+function renderScheduleSummary(data: Record<string, unknown>): string {
+  const count = numberValue(data.questionCount) ?? 0
+  const seconds = numberValue(data.perQuestionSeconds) ?? 0
+  const source = stringValue(data.sourcePolicy) ?? 'MANUAL'
+  return `<b>CONFIRM SCHEDULE</b>\n\nSource · ${escapeHtml(source)}\nQuestions · ${count}\nTime per question · ${seconds} sec\nPoints · Default\nStarts · in 60 sec`
+}
+
+function numberValue(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) ? value : null
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+function arrayOfStrings(value: unknown): string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : []
+}
+
+function uuidLike(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value)
+}
+
+function parseManualQuestion(value: string, communityId: string) {
+  const parts = value.split('|').map((part) => part.trim())
+  const kind = parts[0]?.toUpperCase()
+  const prompt = parts[1]
+  const correct = parts[2]
+  if (!prompt || !correct || !kind) return null
+
+  if (kind === 'MCQ' && parts.length >= 5) {
+    const options = parts.slice(3).map((label) => ({ label, value: label }))
+    if (!options.some((option) => option.value.toLowerCase() === correct.toLowerCase())) return null
+    return {
+      scope: 'COMMUNITY' as const,
+      communityId,
+      source: 'MANUAL' as const,
+      mode: 'QUICK' as const,
+      category: 'Manual',
+      difficulty: 'easy',
+      prompt,
+      options,
+      correctAnswer: correct,
+      acceptedAnswers: [correct],
+      basePoints: 20,
+      fingerprint: `manual:${randomUUID()}`,
+      status: 'APPROVED' as const,
+    }
+  }
+
+  if (kind === 'FREE' && parts.length >= 3) {
+    const aliases = parts[3]
+      ? parts[3]
+          .split(',')
+          .map((alias) => alias.trim())
+          .filter(Boolean)
+      : []
+    return {
+      scope: 'COMMUNITY' as const,
+      communityId,
+      source: 'MANUAL' as const,
+      mode: 'FIRST_CORRECT' as const,
+      category: 'Manual',
+      difficulty: 'easy',
+      prompt,
+      options: null,
+      correctAnswer: correct,
+      acceptedAnswers: [correct, ...aliases],
+      basePoints: 15,
+      fingerprint: `manual:${randomUUID()}`,
+      status: 'APPROVED' as const,
+    }
+  }
+
+  return null
+}
+
+function messageOptions(replyMarkup?: InlineKeyboard) {
+  return { parse_mode: 'HTML' as const, ...(replyMarkup ? { reply_markup: replyMarkup } : {}) }
+}
+
+function commandArguments(context: Context): string[] {
+  return (context.message?.text ?? '').trim().split(/\s+/u).slice(1)
+}
+
+function parseTelegramChatId(value: string): bigint | null {
+  try {
+    const parsed = BigInt(value)
+    return parsed === 0n ? null : parsed
+  } catch {
+    return null
+  }
+}
+
+function payloadString(payload: Record<string, unknown>, key: string): string | null {
+  const value = payload[key]
+  return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+function payloadPositiveInteger(payload: Record<string, unknown>, key: string): number | null {
+  const value = payload[key]
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null
+}
+
+function toTelegramApiChatId(value: bigint): number {
+  const numberValue = Number(value)
+
+  if (!Number.isSafeInteger(numberValue)) {
+    throw new Error('Telegram chat id is outside the supported API range.')
+  }
+
+  return numberValue
+}
+
+function toTelegramMessageId(value: bigint): number {
+  const numberValue = Number(value)
+
+  if (!Number.isSafeInteger(numberValue)) {
+    throw new Error('Telegram message id is outside the supported API range.')
+  }
+
+  return numberValue
+}
+
+function isGroupContext(context: Context): context is Context & {
+  readonly chat: {
+    readonly type: 'group' | 'supergroup'
+    readonly id: number
+    readonly title: string
+  }
+} {
+  return context.chat?.type === 'group' || context.chat?.type === 'supergroup'
+}
+
+function isActiveBotMembership(context: Context): boolean {
+  const status = context.myChatMember?.new_chat_member.status
+  return status !== 'left' && status !== 'kicked'
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+}

@@ -1,0 +1,1 @@
+ALTER TABLE "telegram_updates" ADD COLUMN "processing_started_at" timestamp with time zone DEFAULT now() NOT NULL;

@@ -1,0 +1,2 @@
+ALTER TABLE "wallet_challenges" ADD COLUMN "wallet_link_code_id" uuid NOT NULL;--> statement-breakpoint
+ALTER TABLE "wallet_challenges" ADD CONSTRAINT "wallet_challenges_wallet_link_code_id_wallet_link_codes_id_fk" FOREIGN KEY ("wallet_link_code_id") REFERENCES "public"."wallet_link_codes"("id") ON DELETE cascade ON UPDATE no action;

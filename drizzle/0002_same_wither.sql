@@ -1,0 +1,2 @@
+ALTER TABLE "rounds" ADD COLUMN "clue_number_presented" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
+ALTER TABLE "rounds" ADD CONSTRAINT "rounds_clue_number_presented_valid" CHECK ("rounds"."clue_number_presented" >= 1 AND "rounds"."clue_number_presented" <= 3);

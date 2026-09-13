@@ -1,0 +1,35 @@
+# Rallyo local planning/context — NEVER COMMIT
+.rallyo/
+
+# Agent tooling installed locally, never part of the application
+.agents/
+.codex/
+skills-lock.json
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies / builds
+node_modules/
+dist/
+build/
+coverage/
+.vite/
+
+# Logs
+*.log
+logs/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local databases / temp
+*.sqlite
+*.sqlite3
+tmp/
+.temp/

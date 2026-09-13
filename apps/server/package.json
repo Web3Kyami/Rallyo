@@ -1,0 +1,20 @@
+{
+  "name": "@rallyo/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@nimiq/core": "^2.21.0",
+    "@rallyo/core": "file:../../packages/core",
+    "@rallyo/telegram": "file:../../packages/telegram",
+    "drizzle-orm": "^0.45.2",
+    "fastify": "^5.12.4",
+    "grammy": "^1.46.0",
+    "pg": "^8.23.0",
+    "zod": "^4.0.0"
+  }
+}

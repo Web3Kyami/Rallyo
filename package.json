@@ -1,0 +1,46 @@
+{
+  "name": "rallyo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Telegram-native community game engine with Nimiq-backed player identity and rewards.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22 <27",
+    "npm": ">=10"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev --workspace=@rallyo/server",
+    "dev:web": "npm run dev --workspace=@rallyo/web",
+    "phase3:round": "tsx apps/server/src/scripts/phase3-round.ts",
+    "phase4:schedule": "tsx apps/server/src/scripts/phase4-schedule.ts",
+    "seed:questions": "tsx apps/server/src/scripts/seed-question-bank.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx apps/server/src/db/migrate.ts",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:db": "vitest run apps/server/test/core/round-service.integration.test.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.20.2",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^10.10.0",
+    "prettier": "^3.9.6",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.0",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.0"
+  }
+}

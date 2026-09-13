@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "score_events_source_instance_player_unique" ON "score_events" USING btree ("source_type","source_id","player_id");
