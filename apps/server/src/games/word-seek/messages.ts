@@ -24,10 +24,11 @@ export function renderWordSeekWinner(input: {
   readonly communityTitle: string
   readonly word: string
   readonly winner: string
+  readonly winnerMention?: string
   readonly points: number
   readonly guessesUsed: number
 }): string {
-  return `<b>🏆 WORD SEEK · SOLVED</b>\n\n<b>${escapeHtml(input.communityTitle)}</b>\n✅ <b>${escapeHtml(input.word)}</b>\n\n<b>${escapeHtml(input.winner)} found it first</b>\n✨ <b>+${input.points} pts</b> · ${input.guessesUsed} guess${input.guessesUsed === 1 ? '' : 'es'}`
+  return `<b>🏆 WORD SEEK · SOLVED</b>\n\n<b>${escapeHtml(input.communityTitle)}</b>\n✅ <b>${escapeHtml(input.word)}</b>\n\n<b>${input.winnerMention ?? escapeHtml(input.winner)} found it first</b>\n✨ <b>+${input.points} pts</b> · ${input.guessesUsed} guess${input.guessesUsed === 1 ? '' : 'es'}`
 }
 
 export function renderWordSeekEnded(input: {

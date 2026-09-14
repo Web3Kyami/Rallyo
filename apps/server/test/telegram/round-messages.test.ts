@@ -79,9 +79,9 @@ describe('Telegram round messages', () => {
     }
 
     expect(renderClueRevealMessage(round, 2).text).toBe(
-      '<b>CLUE 2</b>\n\n&gt; second\n\n<i>20 pts remaining</i>',
+      '<b>💡 CLUE 2</b>\n\n&gt; second\n\n<i>20 pts remaining</i>',
     )
-    expect(renderClueRevealMessage(round, 3).text).toContain('<b>CLUE 3</b>')
+    expect(renderClueRevealMessage(round, 3).text).toContain('<b>💡 CLUE 3</b>')
     expect(renderClueRevealMessage(round, 3).text).toContain('10 pts remaining')
   })
 
@@ -93,7 +93,7 @@ describe('Telegram round messages', () => {
         clueNumber: 2,
         points: 20,
       }),
-    ).toContain('<b>🏆 CLUE ROUND — ANSWERED</b>')
+    ).toContain('<b>🏆 CLUE ROUND · ANSWERED</b>')
     expect(
       renderClueRoundAnswered({
         prompt: 'Guess the proof method.',
@@ -101,7 +101,7 @@ describe('Telegram round messages', () => {
         clueNumber: 2,
         points: 20,
       }),
-    ).toContain('Answered on Clue 2')
+    ).toContain('Answered on clue 2')
   })
 
   it('creates an empty keyboard for non-option questions', () => {
@@ -117,7 +117,7 @@ describe('Telegram round messages', () => {
         points: 15,
       }),
     ).toBe(
-      '<b>🏆 FIRST CORRECT — ANSWERED</b>\n\n&lt;What proves control?&gt;\n\n✅ <b>sign a message</b>\n\n<b>@alice got it first</b>\n✨ <b>+15 pts</b>',
+      '<b>🏆 FIRST CORRECT · ANSWERED</b>\n\n&lt;What proves control?&gt;\n\n✅ <b>sign a message</b>\n\n<b>@alice got it first</b>\n✨ <b>+15 pts</b>',
     )
   })
 
@@ -144,17 +144,18 @@ describe('Telegram round messages', () => {
       locksAt,
     })
 
-    expect(message.text).toContain('<b>PROJECT QUIZ / RACE</b>')
-    expect(message.text).toContain('First correct answer wins · 20 pts · 60 sec')
+    expect(message.text).toContain('<b>🧠 PROJECT QUIZ / RACE</b>')
+    expect(message.text).toContain('Reply with your answer. First correct wins.')
     expect(
       renderProjectQuizAnswered({
         prompt: 'Who gets the point?',
         answer: 'Alice',
         winner: '@alice',
+        winnerMention: '<a href="tg://user?id=701">Alice</a>',
         points: 20,
         rank: 4,
       }),
-    ).toContain('Current rank: #4')
+    ).toContain('<a href="tg://user?id=701">Alice</a> won')
   })
 
   it('uses configured hint timings and reductions', () => {

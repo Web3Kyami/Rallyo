@@ -3,14 +3,22 @@ import type { InlineKeyboard } from 'grammy'
 
 import {
   adminKeyboard,
+  activitySettingsKeyboard,
   communitySelectionKeyboard,
+  contentKeyboard,
   confirmKeyboard,
   durationKeyboard,
+  gameKeyboard,
+  gamesKeyboard,
+  helpMessage,
   pendingSocialTaskKeyboard,
   pointsKeyboard,
   questionCountKeyboard,
   questionSelectionKeyboard,
+  seasonKeyboard,
   sourceKeyboard,
+  startMessage,
+  taskSettingsKeyboard,
   TELEGRAM_CALLBACK_DATA_MAX_BYTES,
   telegramCallbackData,
   wordSeekVocabularyKeyboard,
@@ -28,6 +36,14 @@ describe('Telegram admin keyboards', () => {
   it('keeps every settings and admin-control callback within Telegram limits', () => {
     const keyboards = [
       adminKeyboard(communityId),
+      gamesKeyboard(communityId),
+      gameKeyboard(communityId, 'quiz'),
+      gameKeyboard(communityId, 'wordseek', true),
+      gameKeyboard(communityId, 'scramble'),
+      seasonKeyboard(communityId),
+      taskSettingsKeyboard(communityId),
+      activitySettingsKeyboard(communityId),
+      contentKeyboard(communityId),
       communitySelectionKeyboard([{ id: communityId, title: 'Test community' }]),
       sourceKeyboard(communityId),
       questionCountKeyboard(communityId),
@@ -64,12 +80,14 @@ describe('Telegram admin keyboards', () => {
       expect(bytes).toBeLessThanOrEqual(TELEGRAM_CALLBACK_DATA_MAX_BYTES)
     }
 
-    expect(callbackData(adminKeyboard(communityId))).toContain(
-      `admin:toggle:${communityId}:activity`,
-    )
-    expect(callbackData(adminKeyboard(communityId))).not.toContain(
-      `admin:toggle:${communityId}:message_activity`,
-    )
+    expect(callbackData(adminKeyboard(communityId))).toEqual([
+      `admin:section:${communityId}:games`,
+      `admin:section:${communityId}:season`,
+      `admin:section:${communityId}:tasks`,
+      `admin:section:${communityId}:content`,
+      `admin:section:${communityId}:activity`,
+      `admin:refresh:${communityId}`,
+    ])
     expect(
       callbackData(
         questionSelectionKeyboard(
@@ -92,6 +110,14 @@ describe('Telegram admin keyboards', () => {
   it('rejects callback data outside Telegram limits before a request is sent', () => {
     expect(() => telegramCallbackData('x'.repeat(65))).toThrow('received 65')
     expect(telegramCallbackData('x'.repeat(64))).toHaveLength(64)
+  })
+
+  it('keeps onboarding and help copy focused on player actions', () => {
+    expect(startMessage()).toContain('play and rank without a wallet')
+    expect(startMessage()).toContain('Rallyo-native rewards')
+    expect(helpMessage()).toContain('<b>Games</b>')
+    expect(helpMessage()).not.toContain('/task_create')
+    expect(helpMessage(true)).toContain('/task_create')
   })
 
   it('keeps social-task review callbacks compact', () => {

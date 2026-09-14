@@ -473,7 +473,7 @@ describeDatabase('RoundService against PostgreSQL', () => {
 
     await processClueRevealTick(bot, service, new Date(now.getTime() + 20_000))
     expect(sendMessage).toHaveBeenCalledTimes(1)
-    expect(sendMessage.mock.calls[0]?.[1]).toContain('<b>CLUE 2</b>')
+    expect(sendMessage.mock.calls[0]?.[1]).toContain('<b>💡 CLUE 2</b>')
     expect(sendMessage.mock.calls[0]?.[1]).not.toContain('Clue 3')
 
     const restartedService = new RoundService(db)
@@ -482,7 +482,7 @@ describeDatabase('RoundService against PostgreSQL', () => {
 
     await processClueRevealTick(bot, restartedService, new Date(now.getTime() + 40_000))
     expect(sendMessage).toHaveBeenCalledTimes(2)
-    expect(sendMessage.mock.calls[1]?.[1]).toContain('<b>CLUE 3</b>')
+    expect(sendMessage.mock.calls[1]?.[1]).toContain('<b>💡 CLUE 3</b>')
 
     const [persistedRound] = await db
       .select({ clueNumberPresented: schema.rounds.clueNumberPresented })

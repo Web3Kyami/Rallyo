@@ -427,6 +427,7 @@ export class ScrambleService {
       .select({
         round: schema.scrambleRounds,
         winnerDisplayName: schema.telegramIdentities.displayName,
+        winnerTelegramUserId: schema.telegramIdentities.telegramUserId,
         telegramChatId: schema.communities.telegramChatId,
       })
       .from(schema.scrambleRounds)

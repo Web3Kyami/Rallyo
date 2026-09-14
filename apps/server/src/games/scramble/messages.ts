@@ -16,20 +16,21 @@ export function renderScrambleHint(input: {
 export function renderScrambleWinner(input: {
   readonly round: ScrambleRound
   readonly winner: string
+  readonly winnerMention?: string
 }): string {
-  return `<b>🏆 SCRAMBLE — SOLVED</b>\n\n<code>${escapeHtml(input.round.term)}</code>\n\n<b>${escapeHtml(input.winner)} got it first</b>\n✨ <b>+${input.round.pointsRemaining} pts</b>`
+  return `<b>🏆 SCRAMBLE · SOLVED</b>\n\n<code>${escapeHtml(input.round.term)}</code>\n\n<b>${input.winnerMention ?? escapeHtml(input.winner)} got it first</b>\n✨ <b>+${input.round.pointsRemaining} pts</b>`
 }
 
 export function renderScrambleTimeout(round: ScrambleRound): string {
-  return `<b>⏱ SCRAMBLE — TIMEOUT</b>\n\nThe answer was <code>${escapeHtml(round.term)}</code>.\n\nStart another round from community controls.`
+  return `<b>⏱ SCRAMBLE · TIME IS UP</b>\n\nThe answer was <code>${escapeHtml(round.term)}</code>.\n\nStart another round from community controls when you are ready.`
 }
 
 export function renderScrambleStopped(round: ScrambleRound): string {
-  return `<b>⏹ SCRAMBLE — STOPPED</b>\n\nThe answer was <code>${escapeHtml(round.term)}</code>. No points were awarded.`
+  return `<b>⏹ SCRAMBLE · ENDED</b>\n\nThe answer was <code>${escapeHtml(round.term)}</code>. No points were awarded.`
 }
 
 export function renderScrambleNoActive(): string {
-  return 'There is no active Scramble round right now.'
+  return 'There is no Scramble round running right now. An admin can start one from /settings > Games.'
 }
 
 export function renderScrambleHintUnavailable(message: string): string {

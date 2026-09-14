@@ -1,6 +1,6 @@
 import { matchesAcceptedAnswer } from '@rallyo/core'
 import { createRallyoBot } from '@rallyo/telegram'
-import { and, asc, eq, gt, gte, inArray, isNull, lte, or } from 'drizzle-orm'
+import { and, asc, eq, gt, gte, isNull, lte, or } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Context } from 'grammy'
 import { InlineKeyboard } from 'grammy'
@@ -140,14 +140,21 @@ export function createTelegramRuntime(options: TelegramRuntimeOptions) {
 
       if (isGroupContext(context)) {
         await ensureCommunityFromContext(options.database, context)
-        await context.reply('Rallyo is installed. Ask a group admin to run /settings in this chat.')
+        await context.reply(
+          'Rallyo is ready in this community. Play the enabled games here, then check /me in a private chat to see your score.',
+          messageOptions(),
+        )
         return
       }
 
       await context.reply(startMessage(), messageOptions(playerKeyboard(options.appBaseUrl)))
     },
     onHelp: async (context) => {
-      await context.reply(helpMessage(), messageOptions())
+      const isAdmin =
+        isGroupContext(context) && context.from
+          ? await verifyTelegramAdmin(context, context.chat.id, context.from.id)
+          : false
+      await context.reply(helpMessage(isAdmin), messageOptions())
     },
     onSettings: async (context) => {
       await handleSettings(options.database, context, now())
@@ -598,6 +605,14 @@ export async function processScrambleTick(
         ? renderScrambleWinner({
             round: pending.round,
             winner: pending.winnerDisplayName ?? 'A player',
+            ...(pending.winnerTelegramUserId && pending.winnerDisplayName
+              ? {
+                  winnerMention: telegramMention(
+                    pending.winnerTelegramUserId,
+                    pending.winnerDisplayName,
+                  ),
+                }
+              : {}),
           })
         : pending.round.status === 'STOPPED'
           ? renderScrambleStopped(pending.round)
@@ -700,11 +715,12 @@ async function handleGroupText(
       })
 
       if (result.status === 'WON') {
-        const winner = context.from.username
-          ? `@${context.from.username}`
-          : [context.from.first_name, context.from.last_name].filter(Boolean).join(' ') ||
-            'A player'
-        const resultMessage = renderScrambleWinner({ round: result.round, winner })
+        const winner = telegramUserLabel(context.from)
+        const resultMessage = renderScrambleWinner({
+          round: result.round,
+          winner,
+          winnerMention: telegramMention(context.from.id, winner),
+        })
         if (scrambleRound.telegramMessageId !== null) {
           try {
             await context.api.editMessageText(
@@ -739,7 +755,7 @@ async function handleGroupText(
       roundPresentation(lockedRound) === 'typed' &&
       matchesAcceptedAnswer(context.message.text, lockedRound.acceptedAnswers)
     ) {
-      await context.reply('Round already answered.')
+      await context.reply('That round is already closed.')
     }
     return
   }
@@ -764,15 +780,15 @@ async function handleGroupText(
   })
 
   if (result.status === 'WON') {
-    const winner = context.from.username
-      ? `@${context.from.username}`
-      : [context.from.first_name, context.from.last_name].filter(Boolean).join(' ') || 'A player'
+    const winner = telegramUserLabel(context.from)
+    const winnerMention = telegramMention(context.from.id, winner)
     const rank = await roundService.rankForPlayerInSeason(community.id, round.seasonId, playerId)
     const resultMessage = round.presentation
       ? renderProjectQuizAnswered({
           prompt: round.prompt,
           answer: context.message.text,
           winner,
+          winnerMention,
           points: result.points,
           rank,
         })
@@ -781,12 +797,15 @@ async function handleGroupText(
             prompt: round.prompt,
             answer: context.message.text,
             clueNumber,
+            winner,
+            winnerMention,
             points: result.points,
           })
         : renderFirstCorrectAnswered({
             prompt: round.prompt,
             answer: context.message.text,
             winner,
+            winnerMention,
             points: result.points,
           })
 
@@ -810,7 +829,7 @@ async function handleGroupText(
     matchesAcceptedAnswer(context.message.text, round.acceptedAnswers) &&
     (await roundService.lockedRoundForCommunity(community.id, currentTime))
   ) {
-    await context.reply('Round already answered.')
+    await context.reply('That round is already closed.')
   }
 }
 
@@ -855,14 +874,13 @@ async function handleWordSeekText(
       messageOptions(),
     )
   } else if (result.status === 'WON') {
-    const winner = context.from.username
-      ? `@${context.from.username}`
-      : [context.from.first_name, context.from.last_name].filter(Boolean).join(' ') || 'A player'
+    const winner = telegramUserLabel(context.from)
     await context.reply(
       renderWordSeekWinner({
         communityTitle: community.title,
         word: result.word,
         winner,
+        winnerMention: telegramMention(context.from.id, winner),
         points: result.points,
         guessesUsed: result.guessesUsed,
       }),
@@ -888,6 +906,30 @@ async function handleWordSeekText(
       messageOptions(),
     )
   }
+}
+
+function friendlyGameError(error: unknown, gameName: string): string {
+  const detail = error instanceof Error ? error.message : ''
+  const normalized = detail.toLowerCase()
+
+  if (normalized.includes('disabled')) {
+    return `${gameName} is turned off for this community. An admin can enable it from /settings > Games.`
+  }
+  if (normalized.includes('active season') || normalized.includes('season')) {
+    return `${gameName} needs an active season before it can start. Check Season & points in /settings.`
+  }
+  if (
+    normalized.includes('approved') ||
+    normalized.includes('usable') ||
+    normalized.includes('available')
+  ) {
+    return `${gameName} does not have enough approved content to start yet. Check Project content in /settings.`
+  }
+  if (normalized.includes('already has') || normalized.includes('already live')) {
+    return `${gameName} is already live in this community. Open /settings to view the active round.`
+  }
+  if (detail) return detail
+  return `${gameName} could not start. Check the community settings and try again.`
 }
 
 async function handleWordSeekCommand(
@@ -917,7 +959,7 @@ async function handleWordSeekCommand(
       config: {},
     })
   } catch (error) {
-    await context.reply(error instanceof Error ? error.message : 'Word Seek is disabled.')
+    await context.reply(friendlyGameError(error, 'Word Seek'), messageOptions())
     return
   }
 
@@ -942,7 +984,7 @@ async function handleWordSeekCommand(
     })
     await context.reply('Word Seek is live in this community.')
   } catch (error) {
-    await context.reply(error instanceof Error ? error.message : 'Word Seek could not start.')
+    await context.reply(friendlyGameError(error, 'Word Seek'), messageOptions())
   }
 }
 
@@ -952,7 +994,7 @@ async function handleWordSeekAdd(
   context: Context,
 ): Promise<void> {
   if (!isGroupContext(context) || !context.from) {
-    await context.reply('Add project Word Seek words inside the community group.')
+    await context.reply('Add project Word Seek words from the community group.')
     return
   }
 
@@ -969,7 +1011,7 @@ async function handleWordSeekAdd(
   const clue = separator === -1 ? undefined : rawArguments.slice(separator + 1).trim()
 
   if (!word) {
-    await context.reply('Usage: /wordseek_add WORD | optional clue')
+    await context.reply('Format: /wordseek_add WORD | optional clue')
     return
   }
   if (clue && clue.length > 500) {
@@ -985,19 +1027,21 @@ async function handleWordSeekAdd(
       ...(clue ? { clue } : {}),
     })
     await context.reply(
-      `Draft saved: <b>${escapeHtml(created.word)}</b>\nApprove it from /wordseek_words.`,
+      `✅ Draft saved: <b>${escapeHtml(created.word)}</b>\n\nReview it with /wordseek_words before using it in a round.`,
       messageOptions(),
     )
   } catch (error) {
     await context.reply(
-      error instanceof Error ? error.message : 'The project word could not be saved.',
+      error instanceof Error
+        ? error.message
+        : 'The project word could not be saved. Check the word and try again.',
     )
   }
 }
 
 async function handleWordSeekWords(database: RallyoDatabase, context: Context): Promise<void> {
   if (!isGroupContext(context) || !context.from) {
-    await context.reply('View project Word Seek words inside the community group.')
+    await context.reply('View project Word Seek words from the community group.')
     return
   }
 
@@ -1028,13 +1072,13 @@ async function handleWordSeekApprovalCallback(
     .limit(1)
 
   if (!word) {
-    await context.answerCallbackQuery({ text: 'Project word not found.' })
+    await context.answerCallbackQuery({ text: 'That project word is no longer available.' })
     return
   }
 
   const community = await findCommunityById(database, word.communityId)
   if (!community || !context.from) {
-    await context.answerCallbackQuery({ text: 'Community not found.' })
+    await context.answerCallbackQuery({ text: 'This community is no longer available.' })
     return
   }
 
@@ -1045,14 +1089,14 @@ async function handleWordSeekApprovalCallback(
       context.from.id,
     ))
   ) {
-    await context.answerCallbackQuery({ text: 'Admin verification failed.' })
+    await context.answerCallbackQuery({ text: 'We could not verify your admin access.' })
     return
   }
 
   try {
     const approved = await wordSeekService.approveProjectWord(word.id, community.id)
     await context.reply(
-      `Approved project word: <b>${escapeHtml(approved.word)}</b>.`,
+      `✅ Project word approved: <b>${escapeHtml(approved.word)}</b>.`,
       messageOptions(),
     )
     const vocabulary = await renderWordSeekVocabulary(database, community.id)
@@ -1061,7 +1105,9 @@ async function handleWordSeekApprovalCallback(
   } catch (error) {
     await context.answerCallbackQuery({ text: 'Project word was not approved.' })
     await context.reply(
-      error instanceof Error ? error.message : 'The project word was not approved.',
+      error instanceof Error
+        ? error.message
+        : 'The project word could not be approved. Refresh and try again.',
     )
   }
 }
@@ -1074,19 +1120,21 @@ async function handleTasks(
   currentTime: Date,
 ): Promise<void> {
   if (!isGroupContext(context)) {
-    await context.reply('View community tasks inside the group where they are offered.')
+    await context.reply('View community tasks from the group where they are offered.')
     return
   }
 
   const community = await ensureCommunityFromContext(database, context)
   if (!(await gameConfigurations.isEnabled(community.id, 'social_tasks'))) {
-    await context.reply('Social tasks are disabled in this community.')
+    await context.reply(
+      '🎯 Social tasks are turned off here. An admin can enable them from /settings > Social tasks.',
+    )
     return
   }
   const tasks = await socialTaskService.listActive(community.id, currentTime)
   if (tasks.length === 0) {
     await context.reply(
-      '<b>COMMUNITY TASKS</b>\n\nThere are no active tasks right now.',
+      '<b>🎯 COMMUNITY TASKS</b>\n\nThere are no active tasks right now. Check back when a new task is published.',
       messageOptions(),
     )
     return
@@ -1106,23 +1154,31 @@ async function handleTaskSubmit(
   currentTime: Date,
 ): Promise<void> {
   if (!isGroupContext(context) || !context.from) {
-    await context.reply('Submit a task reference inside the community group.')
+    await context.reply(
+      'Submit a task reference from the community group where the task was offered.',
+    )
     return
   }
 
   const community = await findCommunityByTelegramChatId(database, BigInt(context.chat.id))
   if (!community) {
-    await context.reply('This group is not installed as a Rallyo community yet.')
+    await context.reply(
+      'This group is not connected to Rallyo yet. Ask an admin to run /start here.',
+    )
     return
   }
   if (!(await gameConfigurations.isEnabled(community.id, 'social_tasks'))) {
-    await context.reply('Social tasks are disabled in this community.')
+    await context.reply(
+      '🎯 Social tasks are turned off here. An admin can enable them from /settings > Social tasks.',
+    )
     return
   }
 
   const reference = (context.message?.text ?? '').replace(/^\/task_submit(?:@\w+)?\s*/iu, '').trim()
   if (!reference) {
-    await context.reply('Usage: /task_submit URL or reference')
+    await context.reply(
+      'Send the task link or reference after the command, for example: /task_submit https://example.com/post',
+    )
     return
   }
 
@@ -1132,7 +1188,7 @@ async function handleTaskSubmit(
     now: currentTime,
   })
   if (!session) {
-    await context.reply('Choose a task with /tasks first, then submit its URL or reference.')
+    await context.reply('Choose a task with /tasks first, then send its URL or reference.')
     return
   }
 
@@ -1146,12 +1202,14 @@ async function handleTaskSubmit(
     })
     await socialTaskService.clearSubmissionSession(BigInt(context.from.id), community.id)
     await context.reply(
-      `Submission received for <b>${escapeHtml(session.task.title)}</b>. A community reviewer will check it.`,
+      `✅ <b>${escapeHtml(session.task.title)}</b>\n\nYour submission is waiting for community review.`,
       messageOptions(),
     )
   } catch (error) {
     await context.reply(
-      error instanceof Error ? error.message : 'The task submission could not be saved.',
+      error instanceof Error
+        ? error.message
+        : 'Your submission could not be saved. Try again with a valid link or reference.',
     )
   }
 }
@@ -1164,18 +1222,20 @@ async function handleTaskCreate(
   currentTime: Date,
 ): Promise<void> {
   if (!isGroupContext(context) || !context.from) {
-    await context.reply('Create tasks inside the community group.')
+    await context.reply('Create tasks from the community group where they will be offered.')
     return
   }
   if (!(await verifyTelegramAdmin(context, context.chat.id, context.from.id))) {
-    await context.reply('Only a verified community admin can create tasks.')
+    await context.reply('🔒 Only a verified community admin can create tasks here.')
     return
   }
 
   const community = await ensureCommunityFromContext(database, context)
   await rememberVerifiedAdmin(database, context, community.id, currentTime)
   if (!(await gameConfigurations.isEnabled(community.id, 'social_tasks'))) {
-    await context.reply('Enable Social tasks from /settings before creating a task.')
+    await context.reply(
+      '🎯 Social tasks are turned off. Open /settings > Social tasks and enable them first.',
+    )
     return
   }
   const raw = (context.message?.text ?? '').replace(/^\/task_create(?:@\w+)?\s*/iu, '').trim()
@@ -1189,12 +1249,12 @@ async function handleTaskCreate(
 
   if (!title || !instructions || !Number.isSafeInteger(points) || !Number.isSafeInteger(hours)) {
     await context.reply(
-      'Usage: /task_create Title | instructions | points | hours | optional cap | optional cooldown days',
+      'Format: /task_create Title | instructions | points | hours | optional cap | optional cooldown days',
     )
     return
   }
   if (hours < 1 || hours > 24 * 30) {
-    await context.reply('Task duration must be from 1 hour to 30 days.')
+    await context.reply('Choose a task duration from 1 hour to 30 days.')
     return
   }
 
@@ -1211,11 +1271,15 @@ async function handleTaskCreate(
       createdByTelegramUserId: BigInt(context.from.id),
     })
     await context.reply(
-      `Task created: <b>${escapeHtml(task.title)}</b>\n\nUse /tasks to let players submit a URL or reference.`,
+      `✅ Task published: <b>${escapeHtml(task.title)}</b>\n\nPlayers can find it with /tasks and submit a URL or reference.`,
       messageOptions(),
     )
   } catch (error) {
-    await context.reply(error instanceof Error ? error.message : 'The task could not be created.')
+    await context.reply(
+      error instanceof Error
+        ? error.message
+        : 'The task could not be published. Check the format and try again.',
+    )
   }
 }
 
@@ -1228,7 +1292,7 @@ async function handleTaskReview(
   targetCommunityId?: string,
 ): Promise<void> {
   if (!context.from) {
-    await context.reply('Review tasks as a verified community administrator.')
+    await context.reply('Open task review as a verified community administrator.')
     return
   }
 
@@ -1238,7 +1302,7 @@ async function handleTaskReview(
       ? await findCommunityById(database, targetCommunityId)
       : null
   if (!community) {
-    await context.reply('Review tasks inside a Rallyo community group or its private controls.')
+    await context.reply('Open task review from the community group or its private settings.')
     return
   }
   if (
@@ -1248,18 +1312,23 @@ async function handleTaskReview(
       context.from.id,
     ))
   ) {
-    await context.reply('Only a verified community admin can review tasks.')
+    await context.reply('🔒 Only a verified community admin can review tasks here.')
     return
   }
 
   await rememberVerifiedAdmin(database, context, community.id, currentTime)
   if (!(await gameConfigurations.isEnabled(community.id, 'social_tasks'))) {
-    await context.reply('Social tasks are disabled in this community.')
+    await context.reply(
+      '🎯 Social tasks are turned off here. Enable them from /settings > Social tasks.',
+    )
     return
   }
   const pending = await socialTaskService.listPendingSubmissions(community.id, currentTime)
   if (pending.length === 0) {
-    await context.reply('<b>TASK REVIEW</b>\n\nThere are no pending submissions.', messageOptions())
+    await context.reply(
+      '<b>🎯 TASK REVIEW</b>\n\nYou are all caught up. There are no pending submissions.',
+      messageOptions(),
+    )
     return
   }
 
@@ -1277,22 +1346,24 @@ async function handleTaskExpire(
   currentTime: Date,
 ): Promise<void> {
   if (!isGroupContext(context) || !context.from) {
-    await context.reply('Expire tasks inside the community group.')
+    await context.reply('Archive expired tasks from the community group.')
     return
   }
   if (!(await verifyTelegramAdmin(context, context.chat.id, context.from.id))) {
-    await context.reply('Only a verified community admin can expire tasks.')
+    await context.reply('🔒 Only a verified community admin can archive tasks here.')
     return
   }
 
   const community = await ensureCommunityFromContext(database, context)
   await rememberVerifiedAdmin(database, context, community.id, currentTime)
   if (!(await gameConfigurations.isEnabled(community.id, 'social_tasks'))) {
-    await context.reply('Social tasks are disabled in this community.')
+    await context.reply(
+      '🎯 Social tasks are turned off here. Enable them from /settings > Social tasks.',
+    )
     return
   }
   const archived = await socialTaskService.archiveExpired(currentTime, community.id)
-  await context.reply(`Archived ${archived} expired task${archived === 1 ? '' : 's'}.`)
+  await context.reply(`✅ Archived ${archived} expired task${archived === 1 ? '' : 's'}.`)
 }
 
 async function handleManualAward(
@@ -1302,11 +1373,11 @@ async function handleManualAward(
   currentTime: Date,
 ): Promise<void> {
   if (!isGroupContext(context) || !context.from) {
-    await context.reply('Award points inside the community group.')
+    await context.reply('Award points from the community group where the player is active.')
     return
   }
   if (!(await verifyTelegramAdmin(context, context.chat.id, context.from.id))) {
-    await context.reply('Only a verified community admin can award points.')
+    await context.reply('🔒 Only a verified community admin can award points here.')
     return
   }
 
@@ -1321,20 +1392,21 @@ async function handleManualAward(
   const reason = fields.slice(2).join(' ').trim()
 
   if (targetTelegramUserId === null || !Number.isSafeInteger(points) || !reason) {
-    await context.reply('Usage: /award TELEGRAM_USER_ID positive_points reason')
+    await context.reply('Format: /award TELEGRAM_USER_ID positive_points reason')
     return
   }
 
   const [identity] = await database
     .select({
       playerId: schema.telegramIdentities.playerId,
+      telegramUserId: schema.telegramIdentities.telegramUserId,
       displayName: schema.telegramIdentities.displayName,
     })
     .from(schema.telegramIdentities)
     .where(eq(schema.telegramIdentities.telegramUserId, targetTelegramUserId))
     .limit(1)
   if (!identity) {
-    await context.reply('That Telegram player has not joined Rallyo yet.')
+    await context.reply('That player has not joined Rallyo yet. Ask them to send /start first.')
     return
   }
 
@@ -1349,11 +1421,15 @@ async function handleManualAward(
       now: currentTime,
     })
     await context.reply(
-      `${result.created ? 'Awarded' : 'Already awarded'} <b>+${points} pts</b> to <b>${escapeHtml(identity.displayName)}</b>.`,
+      `${result.created ? '✅ Awarded' : 'ℹ️ Already awarded'} <b>+${points} pts</b> to ${telegramMention(identity.telegramUserId, identity.displayName)}.`,
       messageOptions(),
     )
   } catch (error) {
-    await context.reply(error instanceof Error ? error.message : 'The manual award failed.')
+    await context.reply(
+      error instanceof Error
+        ? error.message
+        : 'The award could not be recorded. Check the points and active season, then try again.',
+    )
   }
 }
 
@@ -1368,7 +1444,7 @@ async function handleSocialTaskReviewCallback(
 ): Promise<void> {
   const community = await findCommunityById(database, communityId)
   if (!community || !context.from) {
-    await context.answerCallbackQuery({ text: 'Community not found.' })
+    await context.answerCallbackQuery({ text: 'This community is no longer available.' })
     return
   }
   const callbackChatId = context.callbackQuery?.message?.chat.id
@@ -1393,7 +1469,7 @@ async function handleSocialTaskReviewCallback(
       })
       await context.answerCallbackQuery({ text: 'Submission approved.' })
       await context.reply(
-        `Submission approved. <b>+${result.scoreEvent.delta} pts</b> entered the community leaderboard.`,
+        `✅ Submission approved. <b>+${result.scoreEvent.delta} pts</b> added to the community leaderboard.`,
         messageOptions(),
       )
     } else {
@@ -1406,8 +1482,12 @@ async function handleSocialTaskReviewCallback(
       await context.reply('Submission rejected. No points were awarded.', messageOptions())
     }
   } catch (error) {
-    await context.answerCallbackQuery({ text: 'Review action failed.' })
-    await context.reply(error instanceof Error ? error.message : 'The review action failed.')
+    await context.answerCallbackQuery({ text: 'This review could not be completed.' })
+    await context.reply(
+      error instanceof Error
+        ? error.message
+        : 'This review could not be completed. Refresh the list and try again.',
+    )
   }
 }
 
@@ -1420,7 +1500,7 @@ async function handleScrambleStart(
   presentRound: () => PresentScramble | null,
 ): Promise<void> {
   if (!isGroupContext(context) || !context.from) {
-    await context.reply('Start Scramble inside the community group.')
+    await context.reply('Start Scramble from the community group.')
     return
   }
 
@@ -1456,7 +1536,7 @@ async function handleScrambleStart(
     })
     await context.reply('Scramble is live. Reply with the unscrambled term.')
   } catch (error) {
-    await context.reply(error instanceof Error ? error.message : 'Scramble could not start.')
+    await context.reply(friendlyGameError(error, 'Scramble'), messageOptions())
   }
 }
 
@@ -1467,7 +1547,7 @@ async function handleScrambleStop(
   currentTime: Date,
 ): Promise<void> {
   if (!isGroupContext(context) || !context.from) {
-    await context.reply('Stop Scramble inside the community group.')
+    await context.reply('Stop Scramble from the community group.')
     return
   }
 
@@ -1499,7 +1579,7 @@ async function handleScrambleHint(
   currentTime: Date,
 ): Promise<void> {
   if (!isGroupContext(context)) {
-    await context.reply('Ask for a Scramble hint inside the community group.')
+    await context.reply('Ask for a Scramble hint from the community group.')
     return
   }
 
@@ -1534,7 +1614,7 @@ async function handleScrambleHint(
     )
   } else if (result.status === 'DISABLED') {
     await context.reply(
-      renderScrambleHintUnavailable('Hints are disabled for this community.'),
+      renderScrambleHintUnavailable('Hints are turned off for this community.'),
       messageOptions(),
     )
   } else if (result.status === 'MAX_HINTS') {
@@ -1603,21 +1683,26 @@ async function handlePlayerCallback(
     await handleLink(database, walletLinkService, context, appBaseUrl, currentTime)
     return
   }
+  if (data === 'player:me') {
+    await context.answerCallbackQuery()
+    await handleMe(database, roundService, context, currentTime, appBaseUrl)
+    return
+  }
   const [scope, kind, identifier] = data.split(':')
   if (scope === 'player' && kind === 'task' && identifier && context.from) {
     const callbackChat = callback.message?.chat
     if (!callbackChat || (callbackChat.type !== 'group' && callbackChat.type !== 'supergroup')) {
-      await context.answerCallbackQuery({ text: 'Choose tasks inside a community group.' })
+      await context.answerCallbackQuery({ text: 'Open /tasks in a community group first.' })
       return
     }
 
     const community = await findCommunityByTelegramChatId(database, BigInt(callbackChat.id))
     if (!community) {
-      await context.answerCallbackQuery({ text: 'Community not found.' })
+      await context.answerCallbackQuery({ text: 'This community is no longer available.' })
       return
     }
     if (!(await gameConfigurations.isEnabled(community.id, 'social_tasks'))) {
-      await context.answerCallbackQuery({ text: 'Social tasks are disabled here.' })
+      await context.answerCallbackQuery({ text: 'Social tasks are turned off here.' })
       return
     }
 
@@ -1644,7 +1729,7 @@ async function handlePlayerCallback(
   const [, quickKind, roundId, optionIndexValue] = data.split(':')
 
   if (quickKind !== 'quick' || !roundId || optionIndexValue === undefined) {
-    await context.answerCallbackQuery({ text: 'This player action is not available yet.' })
+    await context.answerCallbackQuery({ text: 'That player action is not available here.' })
     return
   }
 
@@ -1694,14 +1779,13 @@ async function handlePlayerCallback(
           : 'This round is closed'
 
   if (result.status === 'ACCEPTED' && round.presentation && context.from) {
-    const winner = context.from.username
-      ? `@${context.from.username}`
-      : [context.from.first_name, context.from.last_name].filter(Boolean).join(' ') || 'A player'
+    const winner = telegramUserLabel(context.from)
     const rank = await roundService.rankForPlayerInSeason(community!.id, round.seasonId, playerId)
     const resultMessage = renderProjectQuizAnswered({
       prompt: round.prompt,
       answer: option.value,
       winner,
+      winnerMention: telegramMention(context.from.id, winner),
       points: result.points,
       rank,
     })
@@ -1757,7 +1841,7 @@ async function handleAdminCallback(
     const submission = await socialTaskService.communityForSubmission(communityId)
     const community = submission ? await findCommunityById(database, submission.communityId) : null
     if (!community) {
-      await context.answerCallbackQuery({ text: 'Community not found.' })
+      await context.answerCallbackQuery({ text: 'This community is no longer available.' })
       return
     }
     if (
@@ -1767,7 +1851,7 @@ async function handleAdminCallback(
         context.from.id,
       ))
     ) {
-      await context.answerCallbackQuery({ text: 'Admin verification failed.' })
+      await context.answerCallbackQuery({ text: 'We could not verify your admin access.' })
       return
     }
     await rememberVerifiedAdmin(database, context, community.id, currentTime)
@@ -1785,7 +1869,7 @@ async function handleAdminCallback(
 
   const community = await findCommunityById(database, communityId)
   if (!community) {
-    await context.answerCallbackQuery({ text: 'Community not found.' })
+    await context.answerCallbackQuery({ text: 'This community is no longer available.' })
     return
   }
 
@@ -1796,16 +1880,46 @@ async function handleAdminCallback(
       context.from.id,
     ))
   ) {
-    await context.answerCallbackQuery({ text: 'Admin verification failed.' })
+    await context.answerCallbackQuery({ text: 'We could not verify your admin access.' })
     return
   }
 
+  const navigationPage =
+    action === 'section' && argument
+      ? navigationPageForSection(argument)
+      : action === 'game' && argument
+        ? navigationPageForGame(argument)
+        : (action === 'back' || action === 'refresh_page') && argument
+          ? navigationPageForTarget(argument)
+          : null
+
   try {
-    if (action === 'select') {
-      await context.reply(
-        await renderAdminMenu(database, community.id, currentTime),
-        messageOptions(adminKeyboard(community.id)),
+    if (navigationPage) {
+      const page = await renderAdminNavigationPage(
+        database,
+        gameConfigurations,
+        roundService,
+        wordSeekService,
+        scrambleService,
+        socialTaskService,
+        community.id,
+        navigationPage,
+        currentTime,
       )
+      await context.reply(page.text, messageOptions(page.keyboard))
+    } else if (action === 'select' || action === 'refresh') {
+      const page = await renderAdminNavigationPage(
+        database,
+        gameConfigurations,
+        roundService,
+        wordSeekService,
+        scrambleService,
+        socialTaskService,
+        community.id,
+        'home',
+        currentTime,
+      )
+      await context.reply(page.text, messageOptions(page.keyboard))
     } else if (action === 'task_review') {
       await handleTaskReview(
         database,
@@ -1840,11 +1954,27 @@ async function handleAdminCallback(
         enabled: !(current?.enabled ?? false),
         config: current?.config ?? {},
       })
-      await context.reply(
-        await renderAdminMenu(database, community.id, currentTime),
-        messageOptions(adminKeyboard(community.id)),
+      const page = await renderAdminNavigationPage(
+        database,
+        gameConfigurations,
+        roundService,
+        wordSeekService,
+        scrambleService,
+        socialTaskService,
+        community.id,
+        navigationPageForCapability(capabilityKey),
+        currentTime,
       )
+      await context.reply(page.text, messageOptions(page.keyboard))
     } else if (action === 'run') {
+      if (!(await gameConfigurations.isEnabled(community.id, 'project_quiz'))) {
+        await context.reply(
+          '🧠 Project Quiz is turned off for this community. Open Games in /settings to enable it.',
+          messageOptions(),
+        )
+        await context.answerCallbackQuery({ text: 'Project Quiz is turned off.' })
+        return
+      }
       const season = await activeSeasonForCommunity(database, community.id, currentTime)
       const projectQuizConfiguration = await gameConfigurations.getProjectQuizConfig(community.id)
       const question = await firstApprovedQuestion(
@@ -1853,8 +1983,20 @@ async function handleAdminCallback(
         projectQuizConfiguration.config.contentSource,
       )
       const presenter = presentRound()
-      if (!season || !question || !presenter) {
-        await context.reply('Run now needs an active season and at least one approved question.')
+      if (!season) {
+        await context.reply(
+          'Project Quiz needs an active season before it can start. Open Season & points in /settings, then ask a platform operator to activate the season.',
+          messageOptions(),
+        )
+      } else if (!question) {
+        await context.reply(
+          'Project Quiz has no approved questions ready for this community. Add or approve content from Project content in /settings.',
+          messageOptions(),
+        )
+      } else if (!presenter) {
+        await context.reply(
+          'Project Quiz is still preparing the community game. Try again in a moment.',
+        )
       } else {
         const round = await roundService.startLiveRound({
           communityId: community.id,
@@ -1869,13 +2011,28 @@ async function handleAdminCallback(
           roundId: round.id,
           at: currentTime,
         })
-        await context.reply('Project Quiz is live in the community.')
+        await context.reply('🧠 Project Quiz is live. Players can reply in the community now.')
       }
     } else if (action === 'scramble_start') {
+      if (!(await gameConfigurations.isEnabled(community.id, 'scramble'))) {
+        await context.reply(
+          '🔀 Scramble is turned off for this community. Open Games in /settings to enable it.',
+          messageOptions(),
+        )
+        await context.answerCallbackQuery({ text: 'Scramble is turned off.' })
+        return
+      }
       const season = await activeSeasonForCommunity(database, community.id, currentTime)
       const presenter = presentScramble()
-      if (!season || !presenter) {
-        await context.reply('Scramble needs an active season before it can start.')
+      if (!season) {
+        await context.reply(
+          'Scramble needs an active season before it can start. Open Season & points in /settings, then ask a platform operator to activate the season.',
+          messageOptions(),
+        )
+      } else if (!presenter) {
+        await context.reply(
+          'Scramble is still preparing the community game. Try again in a moment.',
+        )
       } else {
         const round = await scrambleService.startRound({
           communityId: community.id,
@@ -1888,7 +2045,9 @@ async function handleAdminCallback(
           roundId: round.id,
           at: currentTime,
         })
-        await context.reply('Scramble is live in the community.')
+        await context.reply(
+          '🔀 Scramble is live. Reply with the unscrambled term in the community.',
+        )
       }
     } else if (action === 'scramble_stop') {
       const ended = await scrambleService.stopRound(community.id, currentTime)
@@ -1904,10 +2063,25 @@ async function handleAdminCallback(
         await context.reply('Scramble stopped in the community.')
       }
     } else if (action === 'wordseek') {
+      if (!(await gameConfigurations.isEnabled(community.id, 'word_seek'))) {
+        await context.reply(
+          '🔎 Word Seek is turned off for this community. Open Games in /settings to enable it.',
+          messageOptions(),
+        )
+        await context.answerCallbackQuery({ text: 'Word Seek is turned off.' })
+        return
+      }
       const season = await activeSeasonForCommunity(database, community.id, currentTime)
       const presenter = presentWordSeek()
-      if (!season || !presenter) {
-        await context.reply('Word Seek needs an active season before it can start.')
+      if (!season) {
+        await context.reply(
+          'Word Seek needs an active season before it can start. Open Season & points in /settings, then ask a platform operator to activate the season.',
+          messageOptions(),
+        )
+      } else if (!presenter) {
+        await context.reply(
+          'Word Seek is still preparing the community game. Try again in a moment.',
+        )
       } else {
         const session = await wordSeekService.start({
           communityId: community.id,
@@ -1920,7 +2094,7 @@ async function handleAdminCallback(
           telegramChatId: community.telegramChatId,
           sessionId: session.id,
         })
-        await context.reply('Word Seek is live in the community.')
+        await context.reply('🔎 Word Seek is live. Send a guess in the community.')
       }
     } else if (action === 'wordseekend') {
       const ended = await wordSeekService.endSession({
@@ -2205,22 +2379,25 @@ async function handleAdminCallback(
         .update(schema.communities)
         .set({ automaticRoundsEnabled: !community.automaticRoundsEnabled })
         .where(eq(schema.communities.id, community.id))
-      await context.reply(
-        await renderAdminMenu(database, community.id, currentTime),
-        messageOptions(adminKeyboard(community.id)),
+      const page = await renderAdminNavigationPage(
+        database,
+        gameConfigurations,
+        roundService,
+        wordSeekService,
+        scrambleService,
+        socialTaskService,
+        community.id,
+        'season',
+        currentTime,
       )
-    } else if (action === 'refresh') {
-      await context.reply(
-        await renderAdminMenu(database, community.id, currentTime),
-        messageOptions(adminKeyboard(community.id)),
-      )
+      await context.reply(page.text, messageOptions(page.keyboard))
     } else {
       await context.answerCallbackQuery({ text: 'This admin action is unavailable.' })
       return
     }
-    await context.answerCallbackQuery({ text: 'Done' })
+    await context.answerCallbackQuery({ text: 'Updated.' })
   } catch (error) {
-    await context.answerCallbackQuery({ text: 'Action failed.' })
+    await context.answerCallbackQuery({ text: 'That action could not be completed.' })
     await context.reply(error instanceof Error ? error.message : 'The admin action failed.')
   }
 }
@@ -2244,7 +2421,7 @@ async function handleAdminText(
     ))
   ) {
     await clearAdminWizardSession(database, BigInt(context.from.id), community.id)
-    await context.reply('Admin verification failed. Start /settings again.')
+    await context.reply('We could not verify your admin access. Open /settings in the group again.')
     return
   }
 
@@ -2352,7 +2529,7 @@ async function handleSettings(
 
     if (!isAdmin) {
       await context.reply(
-        'ADMIN ACCESS REQUIRED\n\nOnly a verified Telegram group administrator can open community controls.',
+        '🔒 Community settings are for group admins. Ask a Telegram administrator to open them.',
       )
       return
     }
@@ -2369,10 +2546,10 @@ async function handleSettings(
         await renderAdminMenu(database, community.id, currentTime),
         messageOptions(adminKeyboard(community.id)),
       )
-      await context.reply('Community controls are ready in your private chat.')
+      await context.reply('⚙️ Your community settings are ready in a private chat with Rallyo.')
     } catch {
       await context.reply(
-        'I COULD NOT OPEN PRIVATE CONTROLS\n\nStart a private chat with Rallyo first, then run /settings again here.',
+        'I could not open your private settings yet. Send /start to Rallyo in a private chat, then run /settings in this group again.',
       )
     }
     return
@@ -2385,7 +2562,7 @@ async function handleSettings(
 
     if (communities.length === 0) {
       await context.reply(
-        'NO VERIFIED COMMUNITIES\n\nRun /settings in a Telegram group where you are an administrator, then return here.',
+        'You do not have a saved community yet. Run /settings in a group where you are a Telegram admin, then return here.',
       )
       return
     }
@@ -2402,7 +2579,7 @@ async function handleSettings(
     }
 
     await context.reply(
-      '<b>YOUR COMMUNITIES</b>\n\nChoose a community to manage.',
+      '<b>⚙️ YOUR COMMUNITIES</b>\n\nChoose a community to manage.',
       messageOptions(communitySelectionKeyboard(communities)),
     )
     return
@@ -2412,7 +2589,7 @@ async function handleSettings(
 
   if (targetChatId === null) {
     await context.reply(
-      'SETTINGS\n\nUse a numeric Telegram chat id, for example <code>/settings -1001234567890</code>.',
+      'To open a specific community, use its numeric Telegram chat ID, for example <code>/settings -1001234567890</code>.',
       messageOptions(),
     )
     return
@@ -2422,7 +2599,7 @@ async function handleSettings(
 
   if (!community) {
     await context.reply(
-      'COMMUNITY NOT FOUND\n\nRun /settings in the target Telegram group once the bot has been added.',
+      'I could not find that community. Make sure Rallyo is in the group, then run /settings there once.',
     )
     return
   }
@@ -2435,7 +2612,7 @@ async function handleSettings(
 
   if (!isAdmin) {
     await context.reply(
-      'ADMIN ACCESS REQUIRED\n\nYour Telegram administrator status could not be verified for this community.',
+      'I could not verify you as an admin for that community. Run /settings from the group or ask a group admin to help.',
     )
     return
   }
@@ -2505,11 +2682,11 @@ async function handleMe(
     .limit(1)
 
   const walletMessage = wallet
-    ? '<b>NIMIQ LINKED</b>'
-    : '<b>NIMIQ NOT LINKED</b>\n\nYou can keep playing without a wallet. Linking is required only for wallet-backed identity and rewards.'
+    ? '<b>🔗 Nimiq wallet linked</b>'
+    : '<b>🔗 Nimiq wallet not linked</b>\n\nYou can keep playing without a wallet. Link one when you want wallet-backed identity or Rallyo-native rewards.'
 
   await context.reply(
-    `<b>THIS WEEK</b>\n\n${weeklyMessage}\n\nLifetime XP · ${lifetimeXp}\nScored communities · ${scoredCommunityCount}\n\n${walletMessage}`,
+    `<b>📊 YOUR RALLYO</b>\n\nCurrent season\n${weeklyMessage}\n\nLifetime score · ${lifetimeXp}\nCommunities with score · ${scoredCommunityCount}\n\n${walletMessage}`,
     messageOptions(playerKeyboard(appBaseUrl)),
   )
 }
@@ -2620,48 +2797,6 @@ async function renderAdminMenu(
     ? snapshot.nextRoundAt.toISOString().slice(11, 16)
     : 'Not scheduled'
   const season = snapshot.currentSeason ? escapeHtml(snapshot.currentSeason) : 'No active season'
-  const [wordSeekConfig] = await database
-    .select({ enabled: schema.communityGameConfigs.enabled })
-    .from(schema.communityGameConfigs)
-    .where(
-      and(
-        eq(schema.communityGameConfigs.communityId, communityId),
-        eq(schema.communityGameConfigs.gameKey, 'word_seek'),
-      ),
-    )
-    .limit(1)
-  const [wordSeekSession] = await database
-    .select({ id: schema.wordSeekSessions.id })
-    .from(schema.wordSeekSessions)
-    .where(
-      and(
-        eq(schema.wordSeekSessions.communityId, communityId),
-        eq(schema.wordSeekSessions.status, 'LIVE'),
-      ),
-    )
-    .limit(1)
-  const wordSeekStatus = !wordSeekConfig?.enabled ? 'Off' : wordSeekSession ? 'Live' : 'Ready'
-  const [scrambleConfig] = await database
-    .select({ enabled: schema.communityGameConfigs.enabled })
-    .from(schema.communityGameConfigs)
-    .where(
-      and(
-        eq(schema.communityGameConfigs.communityId, communityId),
-        eq(schema.communityGameConfigs.gameKey, 'scramble'),
-      ),
-    )
-    .limit(1)
-  const [scrambleRound] = await database
-    .select({ id: schema.scrambleRounds.id })
-    .from(schema.scrambleRounds)
-    .where(
-      and(
-        eq(schema.scrambleRounds.communityId, communityId),
-        eq(schema.scrambleRounds.status, 'LIVE'),
-      ),
-    )
-    .limit(1)
-  const scrambleStatus = !scrambleConfig?.enabled ? 'Off' : scrambleRound ? 'Live' : 'Ready'
   const capabilityConfigs = await database
     .select({
       gameKey: schema.communityGameConfigs.gameKey,
@@ -2671,13 +2806,142 @@ async function renderAdminMenu(
     .where(
       and(
         eq(schema.communityGameConfigs.communityId, communityId),
-        inArray(schema.communityGameConfigs.gameKey, ['social_tasks', 'message_activity']),
+        or(
+          eq(schema.communityGameConfigs.gameKey, 'social_tasks'),
+          eq(schema.communityGameConfigs.gameKey, 'message_activity'),
+        ),
       ),
     )
   const capabilityStatus = (key: string) =>
-    capabilityConfigs.find((config) => config.gameKey === key)?.enabled ? 'On' : 'Off'
+    capabilityConfigs.find((config) => config.gameKey === key)?.enabled
+      ? '✅ Enabled'
+      : '⛔ Disabled'
 
-  return `<b>${escapeHtml(snapshot.community.title)}</b>\n\nAutomatic rounds · ${snapshot.community.automaticRoundsEnabled ? 'On' : 'Paused'}\nWord Seek · ${wordSeekStatus}\nScramble · ${scrambleStatus}\nSocial tasks · ${capabilityStatus('social_tasks')}\nMessage activity · ${capabilityStatus('message_activity')}\nNext round · ${nextRound}\nCurrent season · ${season}\nQuestions ready · ${snapshot.readyQuestionCount}`
+  return `<b>⚙️ COMMUNITY SETTINGS</b>\n\n<b>${escapeHtml(snapshot.community.title)}</b>\n\n🏁 Season · ${season}\n🔁 Automatic rounds · ${snapshot.community.automaticRoundsEnabled ? '✅ Running' : '⏸ Paused'}\n🎮 Games · open Games to manage each one\n🎯 Social tasks · ${capabilityStatus('social_tasks')}\n📊 Activity · ${capabilityStatus('message_activity')}\n📝 Approved questions · ${snapshot.readyQuestionCount}\n⏱ Next quiz · ${nextRound}\n\nChoose a section below. Changes apply to this community only.`
+}
+
+async function renderAdminNavigationPage(
+  database: RallyoDatabase,
+  gameConfigurations: CommunityGameConfigService,
+  roundService: RoundService,
+  wordSeekService: WordSeekService,
+  scrambleService: ScrambleService,
+  socialTaskService: SocialTaskService,
+  communityId: string,
+  page: AdminNavigationPage,
+  currentTime: Date,
+): Promise<{ readonly text: string; readonly keyboard: InlineKeyboard }> {
+  if (page === 'home') {
+    return {
+      text: await renderAdminMenu(database, communityId, currentTime),
+      keyboard: adminKeyboard(communityId),
+    }
+  }
+
+  if (page === 'games') {
+    const projectQuiz = await gameConfigurations.getProjectQuizConfig(communityId)
+    const projectQuizLive = await roundService.liveRoundForCommunity(communityId, currentTime)
+    const wordSeekConfig = await gameConfigurations.get(communityId, 'word_seek')
+    const wordSeekSession = await wordSeekService.activeSession(communityId)
+    const scrambleConfig = await gameConfigurations.get(communityId, 'scramble')
+    const scrambleRound = await scrambleService.activeRoundForCommunity(communityId, currentTime)
+    return {
+      text: `<b>🎮 GAMES</b>\n\n<b>🧠 Project Quiz / Race</b>\n${(projectQuiz.row?.enabled ?? true) ? '✅ Enabled' : '⛔ Disabled'} · ${projectQuizLive ? '🟢 Live now' : 'Ready'}\n\n<b>🔎 Word Seek</b>\n${wordSeekConfig?.enabled ? '✅ Enabled' : '⛔ Disabled'} · ${wordSeekSession ? '🟢 Live now' : 'Ready'}\n\n<b>🔀 Scramble</b>\n${scrambleConfig?.enabled ? '✅ Enabled' : '⛔ Disabled'} · ${scrambleRound ? '🟢 Live now' : 'Ready'}\n\nChoose a game to view its controls and content options.`,
+      keyboard: gamesKeyboard(communityId),
+    }
+  }
+
+  if (page === 'season') {
+    const snapshot = await communityAdminSnapshot(database, communityId, currentTime)
+    if (!snapshot) throw new Error('This community is no longer available.')
+    const season = snapshot.currentSeason ? escapeHtml(snapshot.currentSeason) : 'No active season'
+    const nextRound = snapshot.nextRoundAt
+      ? `${snapshot.nextRoundAt.toISOString().slice(11, 16)} UTC`
+      : 'No quiz scheduled'
+    return {
+      text: `<b>🏁 SEASON &amp; POINTS</b>\n\n<b>${escapeHtml(snapshot.community.title)}</b>\nSeason · ${season}\nAutomatic rounds · ${snapshot.community.automaticRoundsEnabled ? '✅ Running' : '⏸ Paused'}\nNext quiz · ${nextRound}\n\nGames, approved tasks, and positive admin awards enter one community leaderboard. Activity counts do not award points.\n\n${snapshot.currentSeason ? 'You can schedule approved questions or pause automatic rounds here.' : 'An active season is required before a game or points award can start. A platform operator must activate one first.'}`,
+      keyboard: seasonKeyboard(communityId),
+    }
+  }
+
+  if (page === 'tasks') {
+    const enabled = await gameConfigurations.isEnabled(communityId, 'social_tasks')
+    const pending = await socialTaskService.listPendingSubmissions(communityId, currentTime)
+    const active = await socialTaskService.listActive(communityId, currentTime)
+    return {
+      text: `<b>🎯 SOCIAL TASKS</b>\n\nStatus · ${enabled ? '✅ Enabled' : '⛔ Disabled'}\nActive tasks · ${active.length}\nPending reviews · ${pending.length}\n\nPlayers choose an active task, then submit a URL or reference. Approval awards points once after manual review.\n\n${enabled ? 'Use Review submissions to process pending work. Use /task_create in the group to publish a new task.' : 'Enable Social tasks here before creating or accepting submissions.'}`,
+      keyboard: taskSettingsKeyboard(communityId),
+    }
+  }
+
+  if (page === 'content') {
+    const snapshot = await communityAdminSnapshot(database, communityId, currentTime)
+    if (!snapshot) throw new Error('This community is no longer available.')
+    return {
+      text: `<b>🧠 PROJECT CONTENT</b>\n\n<b>${escapeHtml(snapshot.community.title)}</b>\nApproved questions ready · ${snapshot.readyQuestionCount}\n\nQuestions power Project Quiz. Approved project words can power Word Seek. Content is reviewed before it reaches live games.\n\nChoose what you want to manage.`,
+      keyboard: contentKeyboard(communityId),
+    }
+  }
+
+  if (page === 'activity') {
+    const enabled = await gameConfigurations.isEnabled(communityId, 'message_activity')
+    return {
+      text: `<b>📊 ACTIVITY</b>\n\nStatus · ${enabled ? '✅ Enabled' : '⛔ Disabled'}\n\nWhen enabled, Rallyo keeps privacy-safe hourly message and reply counts for this community. Message bodies are never stored, and activity does not award points.`,
+      keyboard: activitySettingsKeyboard(communityId),
+    }
+  }
+
+  if (page === 'quiz') {
+    const snapshot = await communityAdminSnapshot(database, communityId, currentTime)
+    if (!snapshot) throw new Error('This community is no longer available.')
+    const config = await gameConfigurations.getProjectQuizConfig(communityId)
+    const live = await roundService.liveRoundForCommunity(communityId, currentTime)
+    return {
+      text: `<b>🧠 PROJECT QUIZ / RACE</b>\n\nStatus · ${(config.row?.enabled ?? true) ? '✅ Enabled' : '⛔ Disabled'}\nRound · ${live ? '🟢 Live now' : 'Ready'}\nAnswer style · ${config.config.presentation === 'multiple_choice' ? 'Choose an answer' : 'Type the answer'}\nHints · ${config.config.hintsEnabled ? 'Enabled' : 'Off'}\nPoints · ${config.config.startingPoints} starting\nApproved questions ready · ${snapshot.readyQuestionCount}\n\nUse Run quiz now for a live round or Schedule quiz for approved questions later.`,
+      keyboard: gameKeyboard(communityId, page, Boolean(live)),
+    }
+  }
+
+  if (page === 'wordseek') {
+    const stored = await gameConfigurations.get(communityId, 'word_seek')
+    const config = wordSeekService.parseConfig(stored?.config ?? {})
+    const live = await wordSeekService.activeSession(communityId)
+    return {
+      text: `<b>🔎 WORD SEEK</b>\n\nStatus · ${stored?.enabled ? '✅ Enabled' : '⛔ Disabled'}\nRound · ${live ? '🟢 Live now' : 'Ready'}\nWord length · ${config.wordLength} letters\nGuesses · ${config.maxGuesses}\nPoints · +${config.points}\nSource · ${config.source === 'PROJECT' ? 'Approved project words' : 'Curated words'}\n\n${stored?.enabled ? 'Players can start when an active season and approved words are available.' : 'Enable Word Seek before players can start it.'}`,
+      keyboard: gameKeyboard(communityId, page, Boolean(live)),
+    }
+  }
+
+  const scramble = await gameConfigurations.getScrambleConfig(communityId)
+  const live = await scrambleService.activeRoundForCommunity(communityId, currentTime)
+  return {
+    text: `<b>🔀 SCRAMBLE</b>\n\nStatus · ${scramble.row?.enabled ? '✅ Enabled' : '⛔ Disabled'}\nRound · ${live ? '🟢 Live now' : 'Ready'}\nPoints · +${scramble.config.points}\nHints · ${scramble.config.hintsEnabled ? `${scramble.config.maxHints} available` : 'Off'}\nSource · ${scramble.config.source === 'PROJECT_BRAIN' ? 'Approved Project Brain terms' : 'Curated terms'}\n\n${scramble.row?.enabled ? 'Players can start when an active season and approved terms are available.' : 'Enable Scramble before players can start it.'}`,
+    keyboard: gameKeyboard(communityId, page, Boolean(live)),
+  }
+}
+
+function navigationPageForSection(value: string): AdminNavigationPage | null {
+  return ['games', 'season', 'tasks', 'content', 'activity'].includes(value)
+    ? (value as AdminSection)
+    : null
+}
+
+function navigationPageForGame(value: string): AdminNavigationPage | null {
+  return ['quiz', 'wordseek', 'scramble'].includes(value) ? (value as AdminGamePage) : null
+}
+
+function navigationPageForTarget(value: string): AdminNavigationPage | null {
+  return value === 'home'
+    ? 'home'
+    : (navigationPageForSection(value) ?? navigationPageForGame(value))
+}
+
+function navigationPageForCapability(capabilityKey: string): AdminNavigationPage {
+  if (capabilityKey === 'word_seek') return 'wordseek'
+  if (capabilityKey === 'scramble') return 'scramble'
+  if (capabilityKey === 'social_tasks') return 'tasks'
+  if (capabilityKey === 'message_activity') return 'activity'
+  return 'home'
 }
 
 type SocialTaskListRow = typeof schema.socialTasks.$inferSelect
@@ -2693,7 +2957,7 @@ function taskTimeLabel(value: Date): string {
 
 function renderSocialTaskList(tasks: readonly SocialTaskListRow[], currentTime: Date): string {
   return [
-    '<b>COMMUNITY TASKS</b>',
+    '<b>🎯 COMMUNITY TASKS</b>',
     '',
     ...tasks.map((task, index) => {
       const remainingHours = Math.max(
@@ -2703,7 +2967,7 @@ function renderSocialTaskList(tasks: readonly SocialTaskListRow[], currentTime: 
       return `${index + 1}. <b>${escapeHtml(task.title)}</b> · +${task.points} pts\n${escapeHtml(truncateTelegramText(task.instructions, 240))}\nOpen until ${taskTimeLabel(task.endsAt)} · about ${remainingHours}h left`
     }),
     '',
-    'Choose a task below, then reply with /task_submit and your URL or reference.',
+    'Choose a task below, then send /task_submit with your URL or reference.',
   ].join('\n')
 }
 
@@ -2721,11 +2985,11 @@ function socialTaskListKeyboard(tasks: readonly SocialTaskListRow[]): InlineKeyb
 
 function renderPendingSocialTasks(rows: readonly PendingSocialTaskRow[]): string {
   return [
-    '<b>TASK REVIEW</b>',
+    '<b>🎯 TASK REVIEW</b>',
     '',
     ...rows.map((row, index) => {
-      const player = row.player.username ? `@${row.player.username}` : row.player.displayName
-      return `${index + 1}. <b>${escapeHtml(row.task.title)}</b> · +${row.task.points} pts\nPlayer · ${escapeHtml(player)}\nReference · ${escapeHtml(truncateTelegramText(row.submission.reference, 300))}`
+      const player = telegramMention(row.player.telegramUserId, row.player.displayName)
+      return `${index + 1}. <b>${escapeHtml(row.task.title)}</b> · +${row.task.points} pts\nPlayer · ${player}\nReference · ${escapeHtml(truncateTelegramText(row.submission.reference, 300))}`
     }),
     '',
     'Approve only submissions that meet the task instructions.',
@@ -2807,21 +3071,24 @@ export function wordSeekVocabularyKeyboard(
   return keyboard
 }
 
-function startMessage(): string {
-  return '<b>Welcome.</b>\n\nPlay inside your communities. Your score follows you here.'
+export function startMessage(): string {
+  return '<b>👋 Welcome to Rallyo</b>\n\nPlay community games, complete approved tasks, and build your score. Your Rallyo identity and points follow you across communities.\n\nYou can play and rank without a wallet. Link Nimiq only when you want wallet-backed identity or Rallyo-native rewards.'
 }
 
-function helpMessage(): string {
-  return '<b>Rallyo help</b>\n\n/start · player menu\n/me · current score and lifetime XP\n/link · link a Nimiq wallet\nProject Quiz · answer in the community, first correct wins\n/scramble · start Scramble as a community admin\n/scramble_hint · ask for a configured hint\n/scramble_stop · stop Scramble as a community admin\n/wordseek · start Word Seek as a community admin\n/wordseek_add · save a project Word Seek draft\n/wordseek_words · review and approve project Word Seek words\n/tasks · view enabled community tasks\n/task_submit · submit a task URL or reference\n/task_create · create a task as an admin\n/task_review · review pending task submissions\n/award · award positive points as an admin\n/settings · community admin controls\n/help · this message'
+export function helpMessage(isAdmin = false): string {
+  const adminSection = isAdmin
+    ? '\n\n<b>🔒 Admin tools</b>\n/settings · community status and controls\n/task_create · publish a social task\n/task_review · review submissions\n/award · award positive points with a reason'
+    : ''
+  return `<b>ℹ️ Rallyo help</b>\n\n<b>Play</b>\n/me · your score, rank, and wallet status\n/tasks · active community tasks\n/task_submit · send a task URL or reference\n\n<b>Games</b>\nProject Quiz · answer the prompt, first correct wins\nWord Seek · solve the hidden word\nScramble · solve the mixed-up term\n\n<b>Account</b>\n/start · welcome and player actions\n/link · connect Nimiq for wallet-backed rewards\n/help · show this guide${adminSection}`
 }
 
 function playerKeyboard(appBaseUrl?: string): InlineKeyboard {
   const keyboard = new InlineKeyboard()
-    .text('My score', 'player:me')
-    .text('Link Nimiq', 'player:link')
+    .text('📊 My score', 'player:me')
+    .text('🔗 Link Nimiq', 'player:link')
 
   if (appBaseUrl) {
-    keyboard.row().url('Open Player HQ', appBaseUrl)
+    keyboard.row().url('🌐 Player view', appBaseUrl)
   }
 
   return keyboard
@@ -2845,31 +3112,103 @@ function adminCallback(action: string, communityIdOrIdentifier: string, argument
   )
 }
 
+type AdminGamePage = 'quiz' | 'wordseek' | 'scramble'
+type AdminSection = 'games' | 'season' | 'tasks' | 'content' | 'activity'
+type AdminNavigationPage = 'home' | AdminSection | AdminGamePage
+
 export function adminKeyboard(communityId: string): InlineKeyboard {
   return new InlineKeyboard()
-    .text('Run Project Quiz', adminCallback('run', communityId))
-    .text('Start Word Seek', adminCallback('wordseek', communityId))
+    .text('🎮 Games', adminCallback('section', communityId, 'games'))
+    .text('🏁 Season & points', adminCallback('section', communityId, 'season'))
     .row()
-    .text('Start Scramble', adminCallback('scramble_start', communityId))
-    .text('Schedule', adminCallback('schedule', communityId))
+    .text('🎯 Social tasks', adminCallback('section', communityId, 'tasks'))
+    .text('🧠 Project content', adminCallback('section', communityId, 'content'))
     .row()
-    .text('Stop Word Seek', adminCallback('wordseekend', communityId))
-    .text('Stop Scramble', adminCallback('scramble_stop', communityId))
+    .text('📊 Activity', adminCallback('section', communityId, 'activity'))
+    .text('🔄 Refresh', adminCallback('refresh', communityId))
+}
+
+export function gamesKeyboard(communityId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('🧠 Project Quiz / Race', adminCallback('game', communityId, 'quiz'))
     .row()
-    .text('Project words', adminCallback('wordseek_words', communityId))
-    .text('Questions', adminCallback('questions', communityId))
+    .text('🔎 Word Seek', adminCallback('game', communityId, 'wordseek'))
     .row()
-    .text('Review tasks', adminCallback('task_review', communityId))
-    .text('Toggle tasks', adminCallback('toggle', communityId, 'tasks'))
+    .text('🔀 Scramble', adminCallback('game', communityId, 'scramble'))
     .row()
-    .text('Toggle activity', adminCallback('toggle', communityId, 'activity'))
-    .text('Toggle Word Seek', adminCallback('toggle', communityId, 'ws'))
+    .text('↩ Back', adminCallback('back', communityId, 'home'))
+}
+
+export function gameKeyboard(
+  communityId: string,
+  game: AdminGamePage,
+  live = false,
+): InlineKeyboard {
+  const keyboard = new InlineKeyboard()
+
+  if (game === 'quiz') {
+    keyboard
+      .text('▶️ Run quiz now', adminCallback('run', communityId))
+      .text('⏱ Schedule quiz', adminCallback('schedule', communityId))
+      .row()
+      .text('📝 Questions', adminCallback('section', communityId, 'content'))
+  } else if (game === 'wordseek') {
+    keyboard
+      .text(
+        live ? '⏹ Stop Word Seek' : '▶️ Start Word Seek',
+        adminCallback(live ? 'wordseekend' : 'wordseek', communityId),
+      )
+      .row()
+      .text('📝 Manage words', adminCallback('wordseek_words', communityId))
+      .text('⚙️ Enable or disable', adminCallback('toggle', communityId, 'ws'))
+  } else {
+    keyboard
+      .text(
+        live ? '⏹ Stop Scramble' : '▶️ Start Scramble',
+        adminCallback(live ? 'scramble_stop' : 'scramble_start', communityId),
+      )
+      .row()
+      .text('⚙️ Enable or disable', adminCallback('toggle', communityId, 'sc'))
+  }
+
+  return keyboard
     .row()
-    .text('Toggle Scramble', adminCallback('toggle', communityId, 'sc'))
+    .text('🔄 Refresh', adminCallback('refresh_page', communityId, game))
+    .text('↩ Games', adminCallback('back', communityId, 'games'))
+}
+
+export function seasonKeyboard(communityId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('⏱ Schedule quiz', adminCallback('schedule', communityId))
+    .text('⏯ Pause or resume', adminCallback('pause', communityId))
     .row()
-    .text('Pause rounds', adminCallback('pause', communityId))
+    .text('🔄 Refresh', adminCallback('refresh_page', communityId, 'season'))
+    .text('↩ Back', adminCallback('back', communityId, 'home'))
+}
+
+export function taskSettingsKeyboard(communityId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('Review submissions', adminCallback('task_review', communityId))
+    .text('Enable or disable', adminCallback('toggle', communityId, 'tasks'))
     .row()
-    .text('Refresh status', adminCallback('refresh', communityId))
+    .text('🔄 Refresh', adminCallback('refresh_page', communityId, 'tasks'))
+    .text('↩ Back', adminCallback('back', communityId, 'home'))
+}
+
+export function activitySettingsKeyboard(communityId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('Enable or disable', adminCallback('toggle', communityId, 'activity'))
+    .row()
+    .text('🔄 Refresh', adminCallback('refresh_page', communityId, 'activity'))
+    .text('↩ Back', adminCallback('back', communityId, 'home'))
+}
+
+export function contentKeyboard(communityId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('📝 Questions', adminCallback('questions', communityId))
+    .text('🔎 Word Seek words', adminCallback('wordseek_words', communityId))
+    .row()
+    .text('↩ Back', adminCallback('back', communityId, 'home'))
 }
 
 export function communitySelectionKeyboard(
@@ -3218,6 +3557,18 @@ function isGroupContext(context: Context): context is Context & {
 function isActiveBotMembership(context: Context): boolean {
   const status = context.myChatMember?.new_chat_member.status
   return status !== 'left' && status !== 'kicked'
+}
+
+function telegramUserLabel(user: {
+  readonly first_name: string
+  readonly last_name?: string
+  readonly username?: string
+}): string {
+  return [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username || 'A player'
+}
+
+function telegramMention(telegramUserId: number | bigint, displayName: string): string {
+  return `<a href="tg://user?id=${telegramUserId.toString()}">${escapeHtml(displayName)}</a>`
 }
 
 function escapeHtml(value: string): string {
