@@ -8,6 +8,7 @@ export type TelegramHandlers = {
   readonly onSettings: (context: Context) => Promise<void>
   readonly onMe: (context: Context) => Promise<void>
   readonly onLink: (context: Context) => Promise<void>
+  readonly onPair: (context: Context) => Promise<void>
   readonly onWordSeek: (context: Context) => Promise<void>
   readonly onWordSeekAdd: (context: Context) => Promise<void>
   readonly onWordSeekWords: (context: Context) => Promise<void>
@@ -38,6 +39,7 @@ export function createRallyoBot(token: string, handlers: TelegramHandlers): Bot 
   bot.command('settings', handlers.onSettings)
   bot.command('me', handlers.onMe)
   bot.command('link', handlers.onLink)
+  bot.command('pair', handlers.onPair)
   bot.command('wordseek', handlers.onWordSeek)
   bot.command('wordseek_add', handlers.onWordSeekAdd)
   bot.command('wordseek_words', handlers.onWordSeekWords)

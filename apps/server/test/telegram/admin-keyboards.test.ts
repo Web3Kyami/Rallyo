@@ -87,6 +87,7 @@ describe('Telegram admin keyboards', () => {
       `admin:section:${communityId}:content`,
       `admin:section:${communityId}:activity`,
       `admin:refresh:${communityId}`,
+      `admin:open:${communityId}`,
     ])
     expect(
       callbackData(

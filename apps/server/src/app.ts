@@ -1,6 +1,10 @@
 import Fastify from 'fastify'
 import { timingSafeEqual } from 'node:crypto'
 
+import type { RallyoDatabase } from './db/client'
+import { AppApiForbiddenError, AppApiNotFoundError, AppApiService } from './core/app-api-service'
+import { AppWalletAuthError, AppWalletAuthService } from './core/app-wallet-auth-service'
+import { AppSessionError, AppSessionService } from './core/app-session-service'
 import type { WalletLinkService } from './core/wallet-link-service'
 
 export type TelegramWebhookOptions = {
@@ -12,6 +16,11 @@ export type ServerOptions = {
   readonly telegramWebhook?: TelegramWebhookOptions
   readonly walletLinkService?: WalletLinkService
   readonly walletLinkOrigin?: string
+  readonly database?: RallyoDatabase
+  readonly appSessionService?: AppSessionService
+  readonly appApiService?: AppApiService
+  readonly appWalletAuthService?: AppWalletAuthService
+  readonly appSessionCookieSecure?: boolean
 }
 
 export function buildServer(options: ServerOptions = {}) {
@@ -19,6 +28,15 @@ export function buildServer(options: ServerOptions = {}) {
   const telegramWebhook = options.telegramWebhook
   const walletLinkService = options.walletLinkService
   const walletLinkOrigin = options.walletLinkOrigin
+  const appSessionService =
+    options.appSessionService ?? (options.database ? new AppSessionService(options.database) : null)
+  const appApiService =
+    options.appApiService ?? (options.database ? new AppApiService(options.database) : null)
+  const appWalletAuthService =
+    options.appWalletAuthService ??
+    (options.database ? new AppWalletAuthService(options.database) : null)
+  const secureSessionCookie =
+    options.appSessionCookieSecure ?? process.env.NODE_ENV === 'production'
 
   app.get('/health', () => ({ status: 'ok' }))
 
@@ -94,7 +112,308 @@ export function buildServer(options: ServerOptions = {}) {
     })
   }
 
+  if (appSessionService) {
+    app.post<{ Body: { code?: string } }>('/api/app/session/exchange', async (request, reply) => {
+      const code = request.body?.code
+      if (typeof code !== 'string' || code.length === 0) {
+        return sendApiError(reply, 400, 'INVALID_REQUEST', 'A session code is required.')
+      }
+      try {
+        const exchanged = await appSessionService.exchangeCode({ code })
+        reply.header('set-cookie', sessionCookie(exchanged.token, secureSessionCookie))
+        return {
+          ok: true,
+          redirectPath: exchanged.redirectPath,
+          expiresAt: exchanged.expiresAt,
+        }
+      } catch (error) {
+        return sendSessionError(reply, error)
+      }
+    })
+
+    app.post('/api/app/session/logout', async (request, reply) => {
+      await appSessionService.revokeSession(readSessionCookie(request.headers.cookie))
+      reply.header('set-cookie', clearSessionCookie(secureSessionCookie))
+      return { ok: true }
+    })
+
+    app.post<{ Body: { code?: string } }>('/api/app/telegram/pair', async (request, reply) => {
+      const sessionToken = readSessionCookie(request.headers.cookie)
+      const code = request.body?.code
+      if (!sessionToken || typeof code !== 'string' || code.length === 0) {
+        return sendApiError(reply, 400, 'INVALID_REQUEST', 'A Telegram pairing code is required.')
+      }
+      try {
+        return await appSessionService.pairTelegram({ sessionToken, code })
+      } catch (error) {
+        if (error instanceof AppSessionError) {
+          return sendApiError(reply, 400, 'TELEGRAM_PAIRING_FAILED', error.message)
+        }
+        return sendApiError(
+          reply,
+          500,
+          'TELEGRAM_PAIRING_ERROR',
+          'Telegram pairing could not be completed.',
+        )
+      }
+    })
+  }
+
+  if (appWalletAuthService) {
+    const setWalletCors = (reply: { header: (name: string, value: string) => unknown }) => {
+      if (walletLinkOrigin) {
+        reply.header('access-control-allow-origin', walletLinkOrigin)
+        reply.header('access-control-allow-headers', 'content-type')
+        reply.header('access-control-allow-methods', 'POST, OPTIONS')
+      }
+    }
+    app.options('/api/app/wallet/*', async (_request, reply) => {
+      setWalletCors(reply)
+      return reply.code(204).send()
+    })
+    app.post<{ Body: { address?: string } }>(
+      '/api/app/wallet/challenge',
+      async (request, reply) => {
+        setWalletCors(reply)
+        const address = request.body?.address
+        if (typeof address !== 'string' || address.length === 0) {
+          return sendApiError(reply, 400, 'INVALID_REQUEST', 'A Nimiq address is required.')
+        }
+        try {
+          return await appWalletAuthService.beginChallenge({ address })
+        } catch (error) {
+          if (error instanceof AppWalletAuthError) {
+            return sendApiError(reply, 400, 'WALLET_AUTH_FAILED', error.message)
+          }
+          return sendApiError(reply, 500, 'WALLET_AUTH_ERROR', 'Wallet sign-in could not start.')
+        }
+      },
+    )
+    app.post<{
+      Body: { challengeId?: string; message?: string; publicKey?: string; signature?: string }
+    }>('/api/app/wallet/complete', async (request, reply) => {
+      setWalletCors(reply)
+      const { challengeId, message, publicKey, signature } = request.body ?? {}
+      if (
+        ![challengeId, message, publicKey, signature].every((value) => typeof value === 'string')
+      ) {
+        return sendApiError(
+          reply,
+          400,
+          'INVALID_REQUEST',
+          'challengeId, message, publicKey, and signature are required.',
+        )
+      }
+      try {
+        const completed = await appWalletAuthService.completeChallenge({
+          challengeId: challengeId as string,
+          message: message as string,
+          publicKey: publicKey as string,
+          signature: signature as string,
+        })
+        reply.header('set-cookie', sessionCookie(completed.token, secureSessionCookie))
+        return {
+          ok: true,
+          redirectPath: completed.redirectPath,
+          expiresAt: completed.expiresAt,
+        }
+      } catch (error) {
+        if (error instanceof AppWalletAuthError) {
+          return sendApiError(reply, 400, 'WALLET_AUTH_FAILED', error.message)
+        }
+        return sendApiError(
+          reply,
+          500,
+          'WALLET_AUTH_ERROR',
+          'Wallet sign-in could not be completed.',
+        )
+      }
+    })
+  }
+
+  if (appSessionService && appApiService) {
+    app.get('/api/app/me', async (request, reply) => {
+      const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+      if (!actor) return
+      try {
+        return await appApiService.bootstrap(actor)
+      } catch (error) {
+        return sendAppApiError(reply, error)
+      }
+    })
+
+    app.get('/api/app/communities', async (request, reply) => {
+      const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+      if (!actor) return
+      try {
+        return { communities: await appApiService.listCommunities(actor) }
+      } catch (error) {
+        return sendAppApiError(reply, error)
+      }
+    })
+
+    app.get<{ Params: { communityId: string } }>(
+      '/api/app/communities/:communityId',
+      async (request, reply) => {
+        const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+        if (!actor) return
+        try {
+          return await appApiService.community(actor, request.params.communityId)
+        } catch (error) {
+          return sendAppApiError(reply, error)
+        }
+      },
+    )
+
+    app.get<{ Params: { communityId: string } }>(
+      '/api/app/communities/:communityId/leaderboard',
+      async (request, reply) => {
+        const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+        if (!actor) return
+        try {
+          return { leaderboard: await appApiService.leaderboard(actor, request.params.communityId) }
+        } catch (error) {
+          return sendAppApiError(reply, error)
+        }
+      },
+    )
+
+    app.get<{ Querystring: { communityId?: string } }>('/api/app/tasks', async (request, reply) => {
+      const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+      if (!actor) return
+      try {
+        return { tasks: await appApiService.tasks(actor, request.query.communityId) }
+      } catch (error) {
+        return sendAppApiError(reply, error)
+      }
+    })
+
+    app.get<{ Params: { taskId: string } }>('/api/app/tasks/:taskId', async (request, reply) => {
+      const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+      if (!actor) return
+      try {
+        return await appApiService.task(actor, request.params.taskId)
+      } catch (error) {
+        return sendAppApiError(reply, error)
+      }
+    })
+
+    app.get('/api/app/rewards', async (request, reply) => {
+      const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+      if (!actor) return
+      try {
+        return await appApiService.rewards(actor)
+      } catch (error) {
+        return sendAppApiError(reply, error)
+      }
+    })
+
+    app.get('/api/app/admin/communities', async (request, reply) => {
+      const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+      if (!actor) return
+      try {
+        return { communities: await appApiService.adminCommunities(actor) }
+      } catch (error) {
+        return sendAppApiError(reply, error)
+      }
+    })
+
+    app.get<{ Params: { communityId: string } }>(
+      '/api/app/admin/communities/:communityId',
+      async (request, reply) => {
+        const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+        if (!actor) return
+        try {
+          return await appApiService.adminOverview(actor, request.params.communityId)
+        } catch (error) {
+          return sendAppApiError(reply, error)
+        }
+      },
+    )
+  }
+
   return app
+}
+
+async function requireAppSession(
+  cookieHeader: string | undefined,
+  service: AppSessionService,
+  reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } },
+) {
+  const session = await service.getSession(readSessionCookie(cookieHeader))
+  if (!session) {
+    sendApiError(reply, 401, 'UNAUTHENTICATED', 'Open Rallyo from Telegram to continue.')
+    return null
+  }
+  return session
+}
+
+function sendSessionError(
+  reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } },
+  error: unknown,
+) {
+  if (error instanceof AppSessionError) {
+    return sendApiError(reply, 401, 'SESSION_CODE_INVALID', error.message)
+  }
+  return sendApiError(reply, 500, 'SESSION_ERROR', 'The Rallyo session could not be created.')
+}
+
+function sendAppApiError(
+  reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } },
+  error: unknown,
+) {
+  if (error instanceof AppApiForbiddenError) {
+    return sendApiError(reply, 403, 'FORBIDDEN', error.message)
+  }
+  if (error instanceof AppApiNotFoundError) {
+    return sendApiError(reply, 404, 'NOT_FOUND', error.message)
+  }
+  return sendApiError(reply, 500, 'APP_API_ERROR', 'Rallyo could not load this state.')
+}
+
+function sendApiError(
+  reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } },
+  statusCode: number,
+  code: string,
+  message: string,
+) {
+  return reply.code(statusCode).send({ error: { code, message } })
+}
+
+function readSessionCookie(cookieHeader: string | undefined): string | undefined {
+  const value = cookieHeader
+    ?.split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith('rallyo_session='))
+    ?.slice('rallyo_session='.length)
+  if (!value) return undefined
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return undefined
+  }
+}
+
+function sessionCookie(token: string, secure: boolean): string {
+  return [
+    `rallyo_session=${encodeURIComponent(token)}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    'Max-Age=2592000',
+    ...(secure ? ['Secure'] : []),
+  ].join('; ')
+}
+
+function clearSessionCookie(secure: boolean): string {
+  return [
+    'rallyo_session=',
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    'Max-Age=0',
+    ...(secure ? ['Secure'] : []),
+  ].join('; ')
 }
 
 function secureTokenEquals(receivedToken: string, expectedToken: string): boolean {

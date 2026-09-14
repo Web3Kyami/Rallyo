@@ -14,6 +14,7 @@ import {
 } from '../db/telegram-updates'
 import { RoundService } from '../core/round-service'
 import { ActivityService } from '../core/activity-service'
+import { AppSessionService } from '../core/app-session-service'
 import {
   CommunityGameConfigService,
   type ProjectQuizConfig,
@@ -110,6 +111,7 @@ export function createTelegramRuntime(options: TelegramRuntimeOptions) {
   const scheduleService = new ScheduleService(options.database)
   const scheduledQuizService = new ScheduledQuizService(options.database)
   const walletLinkService = new WalletLinkService(options.database)
+  const appSessionService = new AppSessionService(options.database)
   const activityService = new ActivityService(options.database)
   const manualScoreService = new ManualScoreService(options.database)
   const socialTaskService = new SocialTaskService(options.database)
@@ -147,7 +149,10 @@ export function createTelegramRuntime(options: TelegramRuntimeOptions) {
         return
       }
 
-      await context.reply(startMessage(), messageOptions(playerKeyboard(options.appBaseUrl)))
+      await context.reply(
+        startMessage(),
+        messageOptions(playerKeyboard(options.appBaseUrl, appSessionService)),
+      )
     },
     onHelp: async (context) => {
       const isAdmin =
@@ -160,10 +165,20 @@ export function createTelegramRuntime(options: TelegramRuntimeOptions) {
       await handleSettings(options.database, context, now())
     },
     onMe: async (context) => {
-      await handleMe(options.database, roundService, context, now(), options.appBaseUrl)
+      await handleMe(
+        options.database,
+        roundService,
+        context,
+        now(),
+        options.appBaseUrl,
+        appSessionService,
+      )
     },
     onLink: async (context) => {
       await handleLink(options.database, walletLinkService, context, options.appBaseUrl, now())
+    },
+    onPair: async (context) => {
+      await handlePair(options.database, appSessionService, context, now())
     },
     onWordSeek: async (context) => {
       await handleWordSeekCommand(
@@ -274,6 +289,8 @@ export function createTelegramRuntime(options: TelegramRuntimeOptions) {
         () => presentRoundForAdmin,
         () => presentScrambleForAdmin,
         () => presentWordSeekForAdmin,
+        appSessionService,
+        options.appBaseUrl,
       )
     },
     onPlayerCallback: async (context) => {
@@ -281,6 +298,7 @@ export function createTelegramRuntime(options: TelegramRuntimeOptions) {
         options.database,
         roundService,
         walletLinkService,
+        appSessionService,
         socialTaskService,
         gameConfigurations,
         context,
@@ -1666,6 +1684,7 @@ async function handlePlayerCallback(
   database: RallyoDatabase,
   roundService: RoundService,
   walletLinkService: WalletLinkService,
+  appSessionService: AppSessionService,
   socialTaskService: SocialTaskService,
   gameConfigurations: CommunityGameConfigService,
   context: Context,
@@ -1683,9 +1702,27 @@ async function handlePlayerCallback(
     await handleLink(database, walletLinkService, context, appBaseUrl, currentTime)
     return
   }
+  if (data === 'player:open') {
+    await context.answerCallbackQuery()
+    if (!appBaseUrl || !context.from) {
+      await context.reply('Open Rallyo from the link in Telegram when the app URL is configured.')
+      return
+    }
+    const { telegramIdentityId } = await ensureTelegramPlayer(database, context)
+    const issued = await appSessionService.issueCode({
+      telegramIdentityId,
+      now: currentTime,
+    })
+    const link = `${appBaseUrl.replace(/\/$/u, '')}/app/open?code=${encodeURIComponent(issued.code)}`
+    await context.reply(
+      `<b>OPEN RALLYO</b>\n\n${escapeHtml(link)}\n\nThis link expires in five minutes and can be used once.`,
+      messageOptions(),
+    )
+    return
+  }
   if (data === 'player:me') {
     await context.answerCallbackQuery()
-    await handleMe(database, roundService, context, currentTime, appBaseUrl)
+    await handleMe(database, roundService, context, currentTime, appBaseUrl, appSessionService)
     return
   }
   const [scope, kind, identifier] = data.split(':')
@@ -1822,6 +1859,8 @@ async function handleAdminCallback(
   presentRound: () => PresentRound | null,
   presentScramble: () => PresentScramble | null,
   presentWordSeek: () => PresentWordSeek | null,
+  appSessionService: AppSessionService,
+  appBaseUrl?: string,
 ): Promise<void> {
   const callback = context.callbackQuery
   if (!callback || !context.from) return
@@ -1881,6 +1920,27 @@ async function handleAdminCallback(
     ))
   ) {
     await context.answerCallbackQuery({ text: 'We could not verify your admin access.' })
+    return
+  }
+
+  if (action === 'open') {
+    if (!appBaseUrl) {
+      await context.answerCallbackQuery({ text: 'The Rallyo app link is not configured.' })
+      return
+    }
+    const { telegramIdentityId } = await ensureTelegramPlayer(database, context)
+    const issued = await appSessionService.issueCode({
+      telegramIdentityId,
+      targetMode: 'admin',
+      targetCommunityId: community.id,
+      now: currentTime,
+    })
+    const link = `${appBaseUrl.replace(/\/$/u, '')}/app/open?code=${encodeURIComponent(issued.code)}`
+    await context.answerCallbackQuery({ text: 'Admin link ready.' })
+    await context.reply(
+      `<b>OPEN RALLYO CONTROL</b>\n\n${escapeHtml(link)}\n\nThis link opens the selected community and expires in five minutes.`,
+      messageOptions(),
+    )
     return
   }
 
@@ -2634,6 +2694,7 @@ async function handleMe(
   context: Context,
   currentTime: Date,
   appBaseUrl?: string,
+  appSessionService?: AppSessionService,
 ): Promise<void> {
   if (!context.from) return
 
@@ -2687,7 +2748,7 @@ async function handleMe(
 
   await context.reply(
     `<b>📊 YOUR RALLYO</b>\n\nCurrent season\n${weeklyMessage}\n\nLifetime score · ${lifetimeXp}\nCommunities with score · ${scoredCommunityCount}\n\n${walletMessage}`,
-    messageOptions(playerKeyboard(appBaseUrl)),
+    messageOptions(playerKeyboard(appBaseUrl, appSessionService)),
   )
 }
 
@@ -2726,6 +2787,27 @@ async function handleLink(
     link
       ? `<b>WALLET LINK CODE</b>\n\nOpen Player HQ:\n${escapeHtml(link)}\n\nThis code expires in 10 minutes and can be used once.`
       : `<b>WALLET LINK CODE</b>\n\n<code>${issued.code}</code>\n\nThis code expires in 10 minutes and can be used once.`,
+    messageOptions(),
+  )
+}
+
+async function handlePair(
+  database: RallyoDatabase,
+  appSessionService: AppSessionService,
+  context: Context,
+  currentTime: Date,
+): Promise<void> {
+  if (!context.from || context.chat?.type !== 'private') {
+    await context.reply('Open a private chat with Rallyo and send /pair to connect Telegram.')
+    return
+  }
+  const { telegramIdentityId } = await ensureTelegramPlayer(database, context)
+  const issued = await appSessionService.issueTelegramPairingCode({
+    telegramIdentityId,
+    now: currentTime,
+  })
+  await context.reply(
+    `<b>TELEGRAM PAIRING CODE</b>\n\n<code>${issued.code}</code>\n\nEnter this code in Rallyo under Connect Telegram. It expires in 10 minutes and can be used once.`,
     messageOptions(),
   )
 }
@@ -3079,16 +3161,23 @@ export function helpMessage(isAdmin = false): string {
   const adminSection = isAdmin
     ? '\n\n<b>🔒 Admin tools</b>\n/settings · community status and controls\n/task_create · publish a social task\n/task_review · review submissions\n/award · award positive points with a reason'
     : ''
-  return `<b>ℹ️ Rallyo help</b>\n\n<b>Play</b>\n/me · your score, rank, and wallet status\n/tasks · active community tasks\n/task_submit · send a task URL or reference\n\n<b>Games</b>\nProject Quiz · answer the prompt, first correct wins\nWord Seek · solve the hidden word\nScramble · solve the mixed-up term\n\n<b>Account</b>\n/start · welcome and player actions\n/link · connect Nimiq for wallet-backed rewards\n/help · show this guide${adminSection}`
+  return `<b>ℹ️ Rallyo help</b>\n\n<b>Play</b>\n/me · your score, rank, and wallet status\n/tasks · active community tasks\n/task_submit · send a task URL or reference\n\n<b>Games</b>\nProject Quiz · answer the prompt, first correct wins\nWord Seek · solve the hidden word\nScramble · solve the mixed-up term\n\n<b>Account</b>\n/start · welcome and player actions\n/link · connect Nimiq for wallet-backed rewards\n/pair · get a one-time code to connect Telegram in Rallyo\n/help · show this guide${adminSection}`
 }
 
-function playerKeyboard(appBaseUrl?: string): InlineKeyboard {
+function playerKeyboard(
+  appBaseUrl: string | undefined,
+  appSessionService: AppSessionService | undefined,
+): InlineKeyboard {
   const keyboard = new InlineKeyboard()
     .text('📊 My score', 'player:me')
     .text('🔗 Link Nimiq', 'player:link')
 
   if (appBaseUrl) {
-    keyboard.row().url('🌐 Player view', appBaseUrl)
+    if (appSessionService) {
+      keyboard.row().text('🌐 Open Rallyo', 'player:open')
+    } else {
+      keyboard.row().url('🌐 Player view', appBaseUrl)
+    }
   }
 
   return keyboard
@@ -3126,6 +3215,8 @@ export function adminKeyboard(communityId: string): InlineKeyboard {
     .row()
     .text('📊 Activity', adminCallback('section', communityId, 'activity'))
     .text('🔄 Refresh', adminCallback('refresh', communityId))
+    .row()
+    .text('🌐 Open Rallyo', adminCallback('open', communityId))
 }
 
 export function gamesKeyboard(communityId: string): InlineKeyboard {
