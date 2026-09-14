@@ -1816,20 +1816,27 @@ async function handleAdminCallback(
         community.id,
       )
     } else if (action === 'toggle') {
-      const toggleableCapabilities = new Set([
-        'word_seek',
-        'scramble',
-        'social_tasks',
-        'message_activity',
-      ])
-      if (!argument || !toggleableCapabilities.has(argument)) {
+      const capabilityByCallbackKey: Record<string, string> = {
+        // Compact keys are used for new keyboards. The full names remain accepted
+        // so an already-delivered older keyboard still resolves safely.
+        ws: 'word_seek',
+        sc: 'scramble',
+        tasks: 'social_tasks',
+        activity: 'message_activity',
+        word_seek: 'word_seek',
+        scramble: 'scramble',
+        social_tasks: 'social_tasks',
+        message_activity: 'message_activity',
+      }
+      const capabilityKey = argument ? capabilityByCallbackKey[argument] : undefined
+      if (!capabilityKey) {
         await context.answerCallbackQuery({ text: 'That capability cannot be changed here.' })
         return
       }
-      const current = await gameConfigurations.get(community.id, argument)
+      const current = await gameConfigurations.get(community.id, capabilityKey)
       await gameConfigurations.set({
         communityId: community.id,
-        gameKey: argument,
+        gameKey: capabilityKey,
         enabled: !(current?.enabled ?? false),
         config: current?.config ?? {},
       })
@@ -1991,13 +1998,23 @@ async function handleAdminCallback(
       const page = numberValue(session.data.questionPage) ?? 0
       const selected = arrayOfStrings(session.data.selectedQuestionIds)
       const questions = await eligibleQuestionsForCommunity(database, community.id, currentTime)
-      if (!questions.some((question) => question.id === argument)) {
+      const questionChoices = arrayOfStrings(session.data.questionChoices)
+      const questionIndex = Number(argument)
+      const questionId = uuidLike(argument)
+        ? argument
+        : Number.isSafeInteger(questionIndex) && questionIndex >= 0
+          ? (questionChoices[questionIndex] ?? questions[questionIndex]?.id)
+          : undefined
+      const question = questionId
+        ? questions.find((candidate) => candidate.id === questionId)
+        : undefined
+      if (!question) {
         await context.answerCallbackQuery({ text: 'That question is no longer eligible.' })
         return
       }
-      const nextSelected = selected.includes(argument)
-        ? selected.filter((id) => id !== argument)
-        : [...selected, argument]
+      const nextSelected = selected.includes(question.id)
+        ? selected.filter((id) => id !== question.id)
+        : [...selected, question.id]
       await saveAdminWizardSession(database, {
         telegramUserId: BigInt(context.from.id),
         communityId: community.id,
@@ -2267,7 +2284,13 @@ async function handleAdminText(
       telegramUserId: BigInt(context.from.id),
       communityId: community.id,
       state: 'QUESTION_SELECT',
-      data: { ...session.data, questionCount: count, questionPage: 0, selectedQuestionIds: [] },
+      data: {
+        ...session.data,
+        questionCount: count,
+        questionPage: 0,
+        questionChoices: eligible.map((question) => question.id),
+        selectedQuestionIds: [],
+      },
       now: currentTime,
     })
     await context.reply(
@@ -2688,7 +2711,10 @@ function socialTaskListKeyboard(tasks: readonly SocialTaskListRow[]): InlineKeyb
   const keyboard = new InlineKeyboard()
   tasks.forEach((task, index) => {
     if (index > 0) keyboard.row()
-    keyboard.text(`Submit · ${truncateTelegramText(task.title, 32)}`, `player:task:${task.id}`)
+    keyboard.text(
+      `Submit · ${truncateTelegramText(task.title, 32)}`,
+      telegramCallbackData(`player:task:${task.id}`),
+    )
   })
   return keyboard
 }
@@ -2706,7 +2732,7 @@ function renderPendingSocialTasks(rows: readonly PendingSocialTaskRow[]): string
   ].join('\n')
 }
 
-function pendingSocialTaskKeyboard(rows: readonly PendingSocialTaskRow[]): InlineKeyboard {
+export function pendingSocialTaskKeyboard(rows: readonly PendingSocialTaskRow[]): InlineKeyboard {
   // The submission id is enough to identify the review. The service resolves its
   // community, keeping callback_data under Telegram's 64-byte limit in group and
   // private admin controls.
@@ -2714,8 +2740,8 @@ function pendingSocialTaskKeyboard(rows: readonly PendingSocialTaskRow[]): Inlin
   rows.forEach((row, index) => {
     if (index > 0) keyboard.row()
     keyboard
-      .text('Approve', `admin:task_approve:${row.submission.id}`)
-      .text('Reject', `admin:task_reject:${row.submission.id}`)
+      .text('Approve', adminCallback('task_approve', row.submission.id))
+      .text('Reject', adminCallback('task_reject', row.submission.id))
   })
   return keyboard
 }
@@ -2762,7 +2788,7 @@ async function renderWordSeekVocabulary(
   }
 }
 
-function wordSeekVocabularyKeyboard(
+export function wordSeekVocabularyKeyboard(
   communityId: string,
   rows: readonly WordSeekVocabularyListRow[],
 ): InlineKeyboard {
@@ -2772,12 +2798,12 @@ function wordSeekVocabularyKeyboard(
   for (const row of rows) {
     if (row.status !== 'DRAFT') continue
     if (draftCount > 0) keyboard.row()
-    keyboard.text(`Approve ${row.word}`, `admin:wordseek_approve:${row.id}`)
+    keyboard.text(`Approve ${row.word}`, adminCallback('wordseek_approve', row.id))
     draftCount += 1
   }
 
   if (draftCount > 0) keyboard.row()
-  keyboard.text('Refresh', `admin:wordseek_words:${communityId}`)
+  keyboard.text('Refresh', adminCallback('wordseek_words', communityId))
   return keyboard
 }
 
@@ -2801,81 +2827,99 @@ function playerKeyboard(appBaseUrl?: string): InlineKeyboard {
   return keyboard
 }
 
-function adminKeyboard(communityId: string): InlineKeyboard {
-  return new InlineKeyboard()
-    .text('Run Project Quiz', `admin:run:${communityId}`)
-    .text('Start Word Seek', `admin:wordseek:${communityId}`)
-    .row()
-    .text('Start Scramble', `admin:scramble_start:${communityId}`)
-    .text('Schedule', `admin:schedule:${communityId}`)
-    .row()
-    .text('Stop Word Seek', `admin:wordseekend:${communityId}`)
-    .text('Stop Scramble', `admin:scramble_stop:${communityId}`)
-    .row()
-    .text('Project words', `admin:wordseek_words:${communityId}`)
-    .text('Questions', `admin:questions:${communityId}`)
-    .row()
-    .text('Review tasks', `admin:task_review:${communityId}`)
-    .text('Toggle tasks', `admin:toggle:${communityId}:social_tasks`)
-    .row()
-    .text('Toggle activity', `admin:toggle:${communityId}:message_activity`)
-    .text('Toggle Word Seek', `admin:toggle:${communityId}:word_seek`)
-    .row()
-    .text('Toggle Scramble', `admin:toggle:${communityId}:scramble`)
-    .row()
-    .text('Pause rounds', `admin:pause:${communityId}`)
-    .row()
-    .text('Refresh status', `admin:refresh:${communityId}`)
+export const TELEGRAM_CALLBACK_DATA_MAX_BYTES = 64
+
+export function telegramCallbackData(data: string): string {
+  const bytes = new TextEncoder().encode(data).byteLength
+  if (bytes < 1 || bytes > TELEGRAM_CALLBACK_DATA_MAX_BYTES) {
+    throw new Error(
+      `Telegram callback_data must be 1-${TELEGRAM_CALLBACK_DATA_MAX_BYTES} bytes; received ${bytes}.`,
+    )
+  }
+  return data
 }
 
-function communitySelectionKeyboard(
+function adminCallback(action: string, communityIdOrIdentifier: string, argument?: string): string {
+  return telegramCallbackData(
+    ['admin', action, communityIdOrIdentifier, ...(argument ? [argument] : [])].join(':'),
+  )
+}
+
+export function adminKeyboard(communityId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('Run Project Quiz', adminCallback('run', communityId))
+    .text('Start Word Seek', adminCallback('wordseek', communityId))
+    .row()
+    .text('Start Scramble', adminCallback('scramble_start', communityId))
+    .text('Schedule', adminCallback('schedule', communityId))
+    .row()
+    .text('Stop Word Seek', adminCallback('wordseekend', communityId))
+    .text('Stop Scramble', adminCallback('scramble_stop', communityId))
+    .row()
+    .text('Project words', adminCallback('wordseek_words', communityId))
+    .text('Questions', adminCallback('questions', communityId))
+    .row()
+    .text('Review tasks', adminCallback('task_review', communityId))
+    .text('Toggle tasks', adminCallback('toggle', communityId, 'tasks'))
+    .row()
+    .text('Toggle activity', adminCallback('toggle', communityId, 'activity'))
+    .text('Toggle Word Seek', adminCallback('toggle', communityId, 'ws'))
+    .row()
+    .text('Toggle Scramble', adminCallback('toggle', communityId, 'sc'))
+    .row()
+    .text('Pause rounds', adminCallback('pause', communityId))
+    .row()
+    .text('Refresh status', adminCallback('refresh', communityId))
+}
+
+export function communitySelectionKeyboard(
   communities: readonly { readonly id: string; readonly title: string }[],
 ): InlineKeyboard {
   const keyboard = new InlineKeyboard()
   communities.forEach((community, index) => {
     if (index > 0) keyboard.row()
-    keyboard.text(community.title, `admin:select:${community.id}`)
+    keyboard.text(community.title, adminCallback('select', community.id))
   })
   return keyboard
 }
 
-function sourceKeyboard(communityId: string): InlineKeyboard {
+export function sourceKeyboard(communityId: string): InlineKeyboard {
   return new InlineKeyboard()
-    .text('Approved manual/project', `admin:source:${communityId}:manual`)
+    .text('Approved manual/project', adminCallback('source', communityId, 'manual'))
     .row()
-    .text('Curated defaults', `admin:source:${communityId}:default`)
+    .text('Curated defaults', adminCallback('source', communityId, 'default'))
     .row()
-    .text('Cancel', `admin:cancel:${communityId}`)
+    .text('Cancel', adminCallback('cancel', communityId))
 }
 
-function questionCountKeyboard(communityId: string): InlineKeyboard {
-  return new InlineKeyboard().text('Cancel', `admin:cancel:${communityId}`)
+export function questionCountKeyboard(communityId: string): InlineKeyboard {
+  return new InlineKeyboard().text('Cancel', adminCallback('cancel', communityId))
 }
 
-function durationKeyboard(communityId: string): InlineKeyboard {
+export function durationKeyboard(communityId: string): InlineKeyboard {
   return new InlineKeyboard()
-    .text('20 sec', `admin:duration:${communityId}:20`)
-    .text('30 sec', `admin:duration:${communityId}:30`)
-    .text('60 sec', `admin:duration:${communityId}:60`)
+    .text('20 sec', adminCallback('duration', communityId, '20'))
+    .text('30 sec', adminCallback('duration', communityId, '30'))
+    .text('60 sec', adminCallback('duration', communityId, '60'))
     .row()
-    .text('Cancel', `admin:cancel:${communityId}`)
+    .text('Cancel', adminCallback('cancel', communityId))
 }
 
-function pointsKeyboard(communityId: string): InlineKeyboard {
+export function pointsKeyboard(communityId: string): InlineKeyboard {
   return new InlineKeyboard()
-    .text('Default points', `admin:points:${communityId}:default`)
+    .text('Default points', adminCallback('points', communityId, 'default'))
     .row()
-    .text('Cancel', `admin:cancel:${communityId}`)
+    .text('Cancel', adminCallback('cancel', communityId))
 }
 
-function confirmKeyboard(communityId: string): InlineKeyboard {
+export function confirmKeyboard(communityId: string): InlineKeyboard {
   return new InlineKeyboard()
-    .text('Confirm', `admin:confirm:${communityId}`)
-    .text('Cancel', `admin:cancel:${communityId}`)
+    .text('Confirm', adminCallback('confirm', communityId))
+    .text('Cancel', adminCallback('cancel', communityId))
 }
 
-function cancelOnlyKeyboard(communityId: string): InlineKeyboard {
-  return new InlineKeyboard().text('Cancel', `admin:cancel:${communityId}`)
+export function cancelOnlyKeyboard(communityId: string): InlineKeyboard {
+  return new InlineKeyboard().text('Cancel', adminCallback('cancel', communityId))
 }
 
 type SelectableQuestion = {
@@ -2895,7 +2939,7 @@ function renderQuestionSelection(
   return `<b>SELECT QUESTIONS</b>\n\nChoose ${count} approved question${count === 1 ? '' : 's'} by topic/text.\nSelected · ${selectedIds.length}/${count}\nPage ${currentPage + 1}/${totalPages}`
 }
 
-function questionSelectionKeyboard(
+export function questionSelectionKeyboard(
   communityId: string,
   questions: readonly SelectableQuestion[],
   page: number,
@@ -2906,20 +2950,25 @@ function questionSelectionKeyboard(
   const totalPages = Math.max(1, Math.ceil(questions.length / pageSize))
   const currentPage = Math.min(Math.max(0, page), totalPages - 1)
   const keyboard = new InlineKeyboard()
-  questions.slice(currentPage * pageSize, (currentPage + 1) * pageSize).forEach((question) => {
-    const marker = selectedIds.includes(question.id) ? '✅ ' : ''
-    const label = `${marker}${truncateTelegramText(question.prompt, 45)}`
-    keyboard.text(label, `admin:pick:${communityId}:${question.id}`).row()
-  })
+  questions
+    .slice(currentPage * pageSize, (currentPage + 1) * pageSize)
+    .forEach((question, offset) => {
+      const questionIndex = currentPage * pageSize + offset
+      const marker = selectedIds.includes(question.id) ? '✅ ' : ''
+      const label = `${marker}${truncateTelegramText(question.prompt, 45)}`
+      keyboard.text(label, adminCallback('pick', communityId, String(questionIndex))).row()
+    })
   if (totalPages > 1) {
     if (currentPage > 0)
-      keyboard.text('← Previous', `admin:pickpage:${communityId}:${currentPage - 1}`)
+      keyboard.text('← Previous', adminCallback('pickpage', communityId, String(currentPage - 1)))
     if (currentPage < totalPages - 1)
-      keyboard.text('Next →', `admin:pickpage:${communityId}:${currentPage + 1}`)
+      keyboard.text('Next →', adminCallback('pickpage', communityId, String(currentPage + 1)))
     keyboard.row()
   }
-  keyboard.text(`Done (${selectedIds.length}/${count})`, `admin:pickdone:${communityId}`).row()
-  keyboard.text('Cancel', `admin:cancel:${communityId}`)
+  keyboard
+    .text(`Done (${selectedIds.length}/${count})`, adminCallback('pickdone', communityId))
+    .row()
+  keyboard.text('Cancel', adminCallback('cancel', communityId))
   return keyboard
 }
 
