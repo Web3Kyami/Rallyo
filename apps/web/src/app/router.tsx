@@ -7,9 +7,9 @@ import {
 } from 'react-router-dom'
 
 import { AdminGate, OperatorBoundary, PlayerGate, PublicShell } from './shells'
+import { DesignShowcasePage } from './design-showcase'
 import {
   AdminRoutePlaceholder,
-  DirectionGate,
   OpenSessionPage,
   PlayerHome,
   PlayerProfile,
@@ -196,7 +196,15 @@ export const router = createBrowserRouter([
     ],
   },
   { path: '/operator/*', element: <OperatorBoundary />, errorElement: <RouteErrorBoundary /> },
-  { path: '/_phase8/directions', element: <DirectionGate />, errorElement: <RouteErrorBoundary /> },
+  ...(import.meta.env.DEV
+    ? [
+        {
+          path: '/_phase8/showcase',
+          element: <DesignShowcasePage />,
+          errorElement: <RouteErrorBoundary />,
+        },
+      ]
+    : []),
   { path: '*', element: <NotFound /> },
 ])
 

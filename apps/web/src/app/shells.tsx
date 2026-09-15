@@ -1,15 +1,15 @@
 import { NavLink, Outlet, Link, useLocation } from 'react-router-dom'
 
+import { Avatar, Icon, LoadingState, ToneBadge, type IconName } from '../components/design-system'
 import { detectEnvironment } from '../platform/environment'
-import { ToneBadge } from '../components/primitives'
 import { useAppSession } from './session'
 
 const playerNav = [
-  { to: '/app', label: 'Home', marker: '01', end: true },
-  { to: '/app/league', label: 'League', marker: '02' },
-  { to: '/app/tasks', label: 'Tasks', marker: '03' },
-  { to: '/app/communities', label: 'Communities', marker: '04' },
-  { to: '/app/me', label: 'You', marker: '05' },
+  { to: '/app', label: 'Home', icon: 'home' as IconName, end: true },
+  { to: '/app/league', label: 'League', icon: 'trophy' as IconName },
+  { to: '/app/tasks', label: 'Tasks', icon: 'list' as IconName },
+  { to: '/app/communities', label: 'Communities', icon: 'users' as IconName },
+  { to: '/app/me', label: 'You', icon: 'user' as IconName },
 ]
 
 export function PublicShell() {
@@ -25,14 +25,24 @@ export function PublicShell() {
 
 export function PlayerGate() {
   const session = useAppSession()
-  if (session.status === 'loading') return <div className="full-state">Loading Rallyo.</div>
+  if (session.status === 'loading')
+    return (
+      <div className="entry-gate">
+        <LoadingState />
+      </div>
+    )
   if (session.status !== 'ready') return <EntryGate />
   return <PlayerShell />
 }
 
 export function AdminGate() {
   const session = useAppSession()
-  if (session.status === 'loading') return <div className="full-state">Loading Rallyo.</div>
+  if (session.status === 'loading')
+    return (
+      <div className="entry-gate">
+        <LoadingState />
+      </div>
+    )
   if (session.status !== 'ready') return <EntryGate />
   if (session.data.adminCommunities.length === 0) return <ForbiddenGate />
   return <AdminShell />
@@ -40,18 +50,51 @@ export function AdminGate() {
 
 export function OperatorBoundary() {
   return (
-    <div className="operator-boundary">
-      <div className="operator-card">
-        <p className="eyebrow">PRIVATE SURFACE</p>
-        <h1>Operator access is separate.</h1>
-        <p>
-          This route is reserved for the later owner session. Player and community admin sessions
-          cannot cross this boundary.
-        </p>
-        <Link className="button button-primary" to="/">
-          Return to Rallyo
+    <div className="operator-shell">
+      <aside className="operator-sidebar">
+        <Link className="brand-lockup" to="/">
+          <span className="brand-mark" aria-hidden="true">
+            R
+          </span>
+          <span>RALLYO</span>
         </Link>
-      </div>
+        <div className="rail-context">
+          <span className="rail-context-label">OPERATOR CONSOLE</span>
+          <strong>Diagnostics</strong>
+          <span>Owner session required</span>
+        </div>
+        <nav className="desktop-nav" aria-label="Operator navigation">
+          <span className="app-nav-link active">
+            <Icon name="home" size={19} />
+            Overview
+          </span>
+          <span className="app-nav-link">
+            <Icon name="users" size={19} />
+            Communities
+          </span>
+          <span className="app-nav-link">
+            <Icon name="user" size={19} />
+            Identity support
+          </span>
+          <span className="app-nav-link">
+            <Icon name="wallet" size={19} />
+            Rewards
+          </span>
+        </nav>
+      </aside>
+      <main className="operator-workspace">
+        <div className="operator-card">
+          <p className="eyebrow">PRIVATE SURFACE</p>
+          <h1>Operator access is separate.</h1>
+          <p>
+            This boundary is reserved for the later owner session. Player and community admin
+            sessions cannot cross into operator controls.
+          </p>
+          <Link className="button button-primary" to="/">
+            Return to Rallyo
+          </Link>
+        </div>
+      </main>
     </div>
   )
 }
@@ -129,11 +172,11 @@ function AdminShell() {
           <span>Admin mode</span>
         </div>
         <nav className="desktop-nav" aria-label="Admin navigation">
-          <AppNavLink to="/app/admin" label="Overview" marker="A0" end />
-          <AppNavLink to="/app/admin/games" label="Games" marker="A1" />
-          <AppNavLink to="/app/admin/season" label="Season" marker="A2" />
-          <AppNavLink to="/app/admin/tasks" label="Social tasks" marker="A3" />
-          <AppNavLink to="/app/admin/content" label="Project content" marker="A4" />
+          <AppNavLink to="/app/admin" label="Overview" icon="home" end />
+          <AppNavLink to="/app/admin/games" label="Games" icon="game" />
+          <AppNavLink to="/app/admin/season" label="Season" icon="trophy" />
+          <AppNavLink to="/app/admin/tasks" label="Social tasks" icon="list" />
+          <AppNavLink to="/app/admin/content" label="Project content" icon="search" />
         </nav>
         <Link className="manage-link" to="/app">
           Back to player view <span aria-hidden="true">↙</span>
@@ -184,12 +227,10 @@ function MobileHeader({ admin = false }: { readonly admin?: boolean }) {
       <div className="mobile-header-center">
         <span className="eyebrow">{title}</span>
       </div>
-      <span
-        className="avatar avatar-small"
-        aria-label={session.status === 'ready' ? session.data.player.displayName : 'Player'}
-      >
-        {session.status === 'ready' ? initial(session.data.player.displayName) : '?'}
-      </span>
+      <Avatar
+        name={session.status === 'ready' ? session.data.player.displayName : 'Player'}
+        size="xs"
+      />
     </header>
   )
 }
@@ -197,13 +238,13 @@ function MobileHeader({ admin = false }: { readonly admin?: boolean }) {
 function AppNavLink({
   to,
   label,
-  marker,
+  icon,
   end,
   compact = false,
 }: {
   readonly to: string
   readonly label: string
-  readonly marker: string
+  readonly icon: IconName
   readonly end?: boolean
   readonly compact?: boolean
 }) {
@@ -213,9 +254,7 @@ function AppNavLink({
       to={to}
       {...(end ? { end: true } : {})}
     >
-      <span className="nav-marker" aria-hidden="true">
-        {marker}
-      </span>
+      <Icon name={icon} size={compact ? 20 : 19} />
       <span>{label}</span>
     </NavLink>
   )
@@ -227,14 +266,14 @@ function EntryGate() {
     <div className="entry-gate">
       <div className="entry-card">
         <p className="eyebrow">RALLYO PLAYER APP</p>
-        <h1>Open Rallyo from Telegram.</h1>
+        <h1>Enter Rallyo your way.</h1>
         <p>
-          Your Rallyo identity starts in Telegram. Wallet linking stays optional for play, rank,
-          tasks, and community competition.
+          Continue with Nimiq Pay when it is available, or use your Telegram identity. Wallet access
+          stays optional for play, rank, tasks, and community competition.
         </p>
         <div className="entry-actions">
           <Link className="button button-primary" to="/app/open">
-            Connect my Rallyo profile
+            Choose sign-in method
           </Link>
           <Link className="button button-outline" to="/">
             Explore Rallyo
@@ -261,8 +300,4 @@ function ForbiddenGate() {
       </div>
     </div>
   )
-}
-
-function initial(value: string): string {
-  return value.trim().slice(0, 1).toUpperCase() || 'R'
 }

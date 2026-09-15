@@ -378,10 +378,10 @@ export function DirectEntryView() {
         <p className="eyebrow">
           {environment.host === 'nimiq-pay' ? 'NIMIQ PAY ENTRY' : 'RALLYO ENTRY'}
         </p>
-        <h1>Connect your Rallyo profile.</h1>
+        <h1>Choose how to enter Rallyo.</h1>
         <p>
-          Open Rallyo from Telegram to continue with the identity you already use in your
-          communities.
+          Continue with Nimiq Pay inside the wallet, or open Telegram to use the Rallyo identity
+          already connected to your communities.
         </p>
         <div className="entry-actions">
           <WalletSignInButton
