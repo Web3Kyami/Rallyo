@@ -1681,7 +1681,25 @@
     color: var(--ink);
     font-size: 11px;
   }
-  .mobile-header > .avatar {
+  .mobile-header-actions {
+    display: flex;
+    align-items: center;
+    justify-self: end;
+    gap: 9px;
+  }
+
+  .mobile-header-player-link {
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-decoration: underline;
+    text-transform: uppercase;
+    text-underline-offset: 3px;
+  }
+
+  .mobile-header-actions > .avatar {
     justify-self: end;
   }
   .bottom-nav {
@@ -2916,5 +2934,740 @@
   .player-task-tabs button {
     padding-inline: 7px;
     font-size: 14px;
+  }
+}
+
+/* Community admin control room */
+
+.admin-scope-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 2px solid var(--ink);
+  background: var(--surface-muted);
+}
+
+.admin-scope-bar strong {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-display);
+  font-size: 22px;
+  letter-spacing: -0.03em;
+}
+
+.admin-scope-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-scope-note,
+.admin-section-count {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-scope-bar + .status-banner,
+.admin-scope-bar + .status-banner + .status-banner {
+  margin-top: 16px;
+}
+
+.admin-overview-primary,
+.admin-overview-secondary {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.admin-season-card,
+.admin-stat-panel,
+.admin-season-hero,
+.admin-action-panel,
+.admin-content-card,
+.admin-community-option,
+.admin-game-row,
+.admin-task-row {
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.admin-season-card {
+  min-height: 250px;
+  padding: 22px;
+  background: var(--rallyo-soft);
+  box-shadow: var(--shadow-primary);
+}
+
+.admin-card-topline,
+.admin-game-heading,
+.admin-task-row-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.admin-season-card h2,
+.admin-stat-panel h2,
+.admin-section-heading h2,
+.admin-action-panel h2,
+.admin-season-hero h2,
+.admin-leaderboard-panel h2 {
+  margin: 7px 0 0;
+  font-family: var(--font-display);
+  font-size: clamp(26px, 4vw, 38px);
+  letter-spacing: -0.05em;
+  line-height: 1;
+}
+
+.admin-season-card p,
+.admin-action-panel p,
+.admin-season-hero p,
+.admin-content-card p,
+.admin-game-copy > p,
+.admin-task-row p,
+.admin-muted-copy {
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.admin-season-card p {
+  max-width: 560px;
+  margin: 12px 0 22px;
+}
+
+.admin-stat-panel {
+  padding: 20px;
+}
+
+.admin-stat-list {
+  display: grid;
+  gap: 0;
+  margin-top: 10px;
+}
+
+.admin-stat {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border-quiet);
+}
+
+.admin-stat span {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.admin-stat strong {
+  font-family: var(--font-display);
+  font-size: 30px;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.admin-section-block {
+  margin-top: 36px;
+}
+
+.admin-section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 14px;
+}
+
+.admin-section-heading h2 {
+  font-size: 30px;
+}
+
+.admin-section-heading .text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.admin-capability-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 2px solid var(--ink);
+  border-bottom: 2px solid var(--ink);
+}
+
+.admin-capability {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px 14px;
+  border-right: 1px solid var(--border-quiet);
+}
+
+.admin-capability:last-child {
+  border-right: 0;
+}
+
+.admin-capability-dot {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  margin-top: 5px;
+  border: 2px solid var(--border-muted);
+  border-radius: 50%;
+}
+
+.admin-capability-dot.is-enabled {
+  border-color: var(--success);
+  background: var(--success);
+}
+
+.admin-capability strong,
+.admin-capability span {
+  display: block;
+}
+
+.admin-capability strong {
+  font-size: 15px;
+}
+
+.admin-capability span {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.admin-overview-secondary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-overview-secondary .panel {
+  min-height: 190px;
+}
+
+.admin-attention-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border-quiet);
+}
+
+.admin-attention-row:last-child {
+  border-bottom: 0;
+}
+
+.admin-attention-row-warning {
+  color: var(--ink);
+}
+
+.admin-attention-mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  background: var(--lime-highlight);
+}
+
+.admin-attention-row-warning .admin-attention-mark {
+  background: #ffe1a3;
+}
+
+.admin-attention-row strong,
+.admin-attention-row p {
+  display: block;
+}
+
+.admin-attention-row strong {
+  font-size: 15px;
+}
+
+.admin-attention-row p {
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.admin-attention-row .text-button {
+  min-height: 40px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.admin-schedule-value {
+  margin-top: 22px;
+  font-family: var(--font-display);
+  font-size: 32px;
+  letter-spacing: -0.04em;
+}
+
+.admin-muted-copy {
+  margin: 8px 0 0;
+}
+
+.admin-page-context {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 20px 0 14px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-game-list {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-game-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 18px;
+  padding: 18px;
+}
+
+.admin-game-row-project_quiz {
+  background: #fffaf0;
+}
+
+.admin-game-row-word_seek {
+  background: #f2fffb;
+}
+
+.admin-game-row-scramble {
+  background: #fff5f8;
+}
+
+.admin-game-row.is-disabled {
+  background: var(--surface-muted);
+}
+
+.admin-game-icon {
+  display: grid;
+  width: 64px;
+  height: 64px;
+  place-items: center;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-control);
+  background: var(--quiz);
+}
+
+.admin-game-row-word_seek .admin-game-icon {
+  background: var(--word-seek);
+}
+
+.admin-game-row-scramble .admin-game-icon {
+  background: var(--scramble);
+}
+
+.admin-game-row.is-disabled .admin-game-icon {
+  background: var(--surface);
+}
+
+.admin-game-copy {
+  min-width: 0;
+}
+
+.admin-game-heading h2 {
+  margin: 5px 0 0;
+  font-family: var(--font-display);
+  font-size: 28px;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.admin-game-copy > p {
+  max-width: 720px;
+  margin: 13px 0 15px;
+}
+
+.admin-game-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-quiet);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.admin-unavailable-action {
+  display: grid;
+  gap: 5px;
+}
+
+.admin-unavailable-action .ds-button {
+  width: fit-content;
+}
+
+.admin-unavailable-action p {
+  max-width: 320px;
+  margin: 0;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: 13px;
+  letter-spacing: 0;
+  line-height: 1.4;
+  text-transform: none;
+}
+
+.admin-game-footer .admin-unavailable-action {
+  flex: 0 0 auto;
+  align-items: end;
+  text-align: right;
+  text-transform: none;
+}
+
+.admin-game-footer .admin-unavailable-action p {
+  max-width: 250px;
+}
+
+.admin-season-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 24px;
+  background: var(--rallyo-soft);
+  box-shadow: var(--shadow-primary);
+}
+
+.admin-season-hero h2 {
+  font-size: clamp(32px, 5vw, 54px);
+}
+
+.admin-season-hero p {
+  max-width: 680px;
+  margin: 12px 0 0;
+}
+
+.admin-action-panel {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 28px;
+  margin-top: 18px;
+  padding: 20px;
+  background: var(--surface-muted);
+}
+
+.admin-action-panel h2 {
+  font-size: 26px;
+}
+
+.admin-action-panel p {
+  max-width: 680px;
+  margin: 10px 0 0;
+}
+
+.admin-action-stack {
+  display: grid;
+  flex: 0 0 min(300px, 100%);
+  gap: 12px;
+}
+
+.admin-action-stack .ds-button {
+  width: 100%;
+}
+
+.admin-leaderboard-panel {
+  margin-top: 18px;
+}
+
+.admin-leaderboard-panel .state-card {
+  margin-top: 16px;
+}
+
+.admin-task-actions {
+  align-items: center;
+}
+
+.admin-task-list {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-task-row {
+  padding: 18px;
+}
+
+.admin-task-row h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 22px;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+.admin-task-row p {
+  max-width: 760px;
+  margin: 8px 0 14px;
+}
+
+.admin-task-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.admin-content-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.admin-content-card {
+  min-height: 190px;
+  padding: 18px;
+}
+
+.admin-content-value {
+  display: block;
+  margin-top: 25px;
+  font-family: var(--font-display);
+  font-size: clamp(30px, 5vw, 44px);
+  letter-spacing: -0.05em;
+  line-height: 0.95;
+}
+
+.admin-content-card p {
+  margin: 12px 0 0;
+}
+
+.admin-readiness-list {
+  display: grid;
+  gap: 0;
+}
+
+.admin-readiness-list > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border-quiet);
+}
+
+.admin-readiness-list > div:last-child {
+  border-bottom: 0;
+}
+
+.admin-readiness-list span {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.admin-readiness-list strong {
+  max-width: 55%;
+  font-size: 15px;
+  text-align: right;
+}
+
+.admin-community-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.admin-community-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  min-height: 96px;
+  padding: 16px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.admin-community-option:hover {
+  background: var(--rallyo-soft);
+}
+
+.admin-community-option-mark {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-control);
+  background: var(--lime-highlight);
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.admin-community-option-copy {
+  min-width: 0;
+}
+
+.admin-community-option-copy strong,
+.admin-community-option-copy span {
+  display: block;
+}
+
+.admin-community-option-copy strong {
+  overflow: hidden;
+  font-family: var(--font-display);
+  font-size: 20px;
+  letter-spacing: -0.03em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-community-option-copy span {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.admin-community-picker + .status-banner {
+  margin-top: 18px;
+}
+
+.admin-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+@media (max-width: 900px) {
+  .admin-overview-primary,
+  .admin-overview-secondary,
+  .admin-content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-capability-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-capability {
+    border-right: 0;
+    border-bottom: 1px solid var(--border-quiet);
+  }
+
+  .admin-capability:last-child {
+    border-bottom: 0;
+  }
+
+  .admin-community-picker {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .admin-scope-bar,
+  .admin-season-hero,
+  .admin-action-panel {
+    display: block;
+  }
+
+  .admin-scope-bar-right {
+    justify-content: space-between;
+    margin-top: 12px;
+  }
+
+  .admin-season-card,
+  .admin-stat-panel,
+  .admin-season-hero,
+  .admin-action-panel,
+  .admin-content-card,
+  .admin-game-row,
+  .admin-task-row {
+    padding: 16px;
+  }
+
+  .admin-section-heading {
+    display: block;
+  }
+
+  .admin-section-heading .text-button {
+    margin-top: 10px;
+  }
+
+  .admin-game-row {
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .admin-game-icon {
+    width: 48px;
+    height: 48px;
+  }
+
+  .admin-game-heading {
+    display: block;
+  }
+
+  .admin-game-heading .tone-badge {
+    margin-top: 10px;
+  }
+
+  .admin-game-footer {
+    display: block;
+  }
+
+  .admin-game-footer .admin-unavailable-action {
+    align-items: start;
+    margin-top: 12px;
+    text-align: left;
+  }
+
+  .admin-action-stack {
+    margin-top: 18px;
+  }
+
+  .admin-action-stack .admin-unavailable-action .ds-button,
+  .admin-task-actions > .admin-unavailable-action .ds-button {
+    width: 100%;
+  }
+
+  .admin-readiness-list > div {
+    display: grid;
+    gap: 6px;
+  }
+
+  .admin-readiness-list strong {
+    max-width: none;
+    text-align: left;
+  }
+
+  .admin-attention-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .admin-attention-row .text-button {
+    grid-column: 2;
+    justify-self: start;
   }
 }

@@ -7,8 +7,9 @@ import {
 } from 'react-router-dom'
 
 import { AdminGate, OperatorBoundary, PlayerGate, PublicShell } from './shells'
+import { AdminEntryPage, AdminOverviewPage, AdminSectionRoute } from './admin-views'
 import { DesignShowcasePage } from './design-showcase'
-import { AdminRoutePlaceholder, OpenSessionPage, PublicHome } from './route-views'
+import { OpenSessionPage, PublicHome } from './route-views'
 import {
   PlayerAvatarOnboardingPage,
   PlayerCommunitiesPage,
@@ -59,96 +60,28 @@ export const router = createBrowserRouter([
     element: <AdminGate />,
     errorElement: <RouteErrorBoundary />,
     children: [
-      {
-        index: true,
-        element: (
-          <AdminRoutePlaceholder
-            title="Community overview"
-            detail="The control surface will show active season state, games, tasks, and attention items."
-          />
-        ),
-      },
-      {
-        path: ':communityId',
-        element: (
-          <AdminRoutePlaceholder
-            title="Community overview"
-            detail="The server derives access from the authenticated Telegram identity and target community."
-          />
-        ),
-      },
+      { index: true, element: <AdminEntryPage /> },
+      { path: ':communityId', element: <AdminOverviewPage /> },
       {
         path: ':communityId/games',
-        element: (
-          <AdminRoutePlaceholder
-            title="Games"
-            detail="Game capability controls will call the existing shared configuration service."
-          />
-        ),
+        element: <AdminSectionRoute section="games" />,
       },
       {
         path: ':communityId/season',
-        element: (
-          <AdminRoutePlaceholder
-            title="Season"
-            detail="Season lifecycle controls will use the existing community-scoped service."
-          />
-        ),
+        element: <AdminSectionRoute section="season" />,
       },
       {
         path: ':communityId/tasks',
-        element: (
-          <AdminRoutePlaceholder
-            title="Social tasks"
-            detail="Task creation and review will reuse the Telegram task service."
-          />
-        ),
+        element: <AdminSectionRoute section="tasks" />,
       },
       {
         path: ':communityId/content',
-        element: (
-          <AdminRoutePlaceholder
-            title="Project content"
-            detail="Content readiness will respect the existing draft and approval rules."
-          />
-        ),
+        element: <AdminSectionRoute section="content" />,
       },
-      {
-        path: 'games',
-        element: (
-          <AdminRoutePlaceholder
-            title="Games"
-            detail="Choose a community before managing game capability."
-          />
-        ),
-      },
-      {
-        path: 'season',
-        element: (
-          <AdminRoutePlaceholder
-            title="Season"
-            detail="Choose a community before managing a season."
-          />
-        ),
-      },
-      {
-        path: 'tasks',
-        element: (
-          <AdminRoutePlaceholder
-            title="Social tasks"
-            detail="Choose a community before managing tasks."
-          />
-        ),
-      },
-      {
-        path: 'content',
-        element: (
-          <AdminRoutePlaceholder
-            title="Project content"
-            detail="Choose a community before reviewing content."
-          />
-        ),
-      },
+      { path: 'games', element: <AdminSectionRoute section="games" /> },
+      { path: 'season', element: <AdminSectionRoute section="season" /> },
+      { path: 'tasks', element: <AdminSectionRoute section="tasks" /> },
+      { path: 'content', element: <AdminSectionRoute section="content" /> },
     ],
   },
   { path: '/operator/*', element: <OperatorBoundary />, errorElement: <RouteErrorBoundary /> },

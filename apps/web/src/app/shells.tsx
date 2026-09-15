@@ -155,6 +155,16 @@ function PlayerShell() {
 
 function AdminShell() {
   const session = useAppSession()
+  const location = useLocation()
+  const routeCommunityId = location.pathname.match(/^\/app\/admin\/([^/]+)/)?.[1]
+  const currentCommunityId =
+    routeCommunityId ??
+    (session.status === 'ready' ? session.data.adminCommunities[0]?.id : undefined)
+  const adminBase = currentCommunityId ? `/app/admin/${currentCommunityId}` : '/app/admin'
+  const currentCommunity =
+    session.status === 'ready'
+      ? session.data.adminCommunities.find((community) => community.id === currentCommunityId)
+      : undefined
   return (
     <div className="admin-shell">
       <aside className="side-rail side-rail-admin">
@@ -166,19 +176,15 @@ function AdminShell() {
         </Link>
         <div className="rail-context">
           <span className="rail-context-label">COMMUNITY CONTROL</span>
-          <strong>
-            {session.status === 'ready'
-              ? (session.data.adminCommunities[0]?.title ?? 'Select community')
-              : 'Select community'}
-          </strong>
+          <strong>{currentCommunity?.title ?? 'Select community'}</strong>
           <span>Admin mode</span>
         </div>
         <nav className="desktop-nav" aria-label="Admin navigation">
-          <AppNavLink to="/app/admin" label="Overview" icon="home" end />
-          <AppNavLink to="/app/admin/games" label="Games" icon="game" />
-          <AppNavLink to="/app/admin/season" label="Season" icon="trophy" />
-          <AppNavLink to="/app/admin/tasks" label="Social tasks" icon="list" />
-          <AppNavLink to="/app/admin/content" label="Project content" icon="search" />
+          <AppNavLink to={adminBase} label="Overview" icon="home" end />
+          <AppNavLink to={`${adminBase}/games`} label="Games" icon="game" />
+          <AppNavLink to={`${adminBase}/season`} label="Season" icon="trophy" />
+          <AppNavLink to={`${adminBase}/tasks`} label="Social tasks" icon="list" />
+          <AppNavLink to={`${adminBase}/content`} label="Project content" icon="search" />
         </nav>
         <Link className="manage-link" to="/app">
           Back to player view <span aria-hidden="true">↙</span>
@@ -231,11 +237,18 @@ function MobileHeader({ admin = false }: { readonly admin?: boolean }) {
       <div className="mobile-header-center">
         <span className="eyebrow">{title}</span>
       </div>
-      <Avatar
-        avatarId={session.status === 'ready' ? getStoredAvatarId() : 'neutral-01'}
-        name={session.status === 'ready' ? session.data.player.displayName : 'Player'}
-        size="xs"
-      />
+      <div className="mobile-header-actions">
+        {admin ? (
+          <Link className="mobile-header-player-link" to="/app">
+            Player
+          </Link>
+        ) : null}
+        <Avatar
+          avatarId={session.status === 'ready' ? getStoredAvatarId() : 'neutral-01'}
+          name={session.status === 'ready' ? session.data.player.displayName : 'Player'}
+          size="xs"
+        />
+      </div>
     </header>
   )
 }

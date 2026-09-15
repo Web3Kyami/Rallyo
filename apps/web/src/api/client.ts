@@ -64,6 +64,8 @@ export const api = {
     ),
   task: (taskId: string) => request<AppTaskDetail>(`/api/app/tasks/${encodeURIComponent(taskId)}`),
   rewards: () => request<AppRewards>('/api/app/rewards'),
+  adminOverview: (communityId: string) =>
+    request<AppAdminOverview>(`/api/app/admin/communities/${encodeURIComponent(communityId)}`),
   exchangeSession: (code: string) =>
     request<{ readonly redirectPath: string }>('/api/app/session/exchange', {
       method: 'POST',
@@ -230,4 +232,20 @@ export type AppBootstrap = {
     readonly walletLinking: boolean
     readonly globalLeague: boolean
   }
+}
+
+export type AppAdminOverview = {
+  readonly community: {
+    readonly id: string
+    readonly title: string
+    readonly slug: string
+    readonly status: string
+  }
+  readonly activeSeason: string | null
+  readonly readyQuestionCount: number
+  readonly nextRoundAt: string | null
+  readonly participantCount: number
+  readonly activeTaskCount: number
+  readonly pendingReviewCount: number
+  readonly games: readonly AppGameCapability[]
 }
