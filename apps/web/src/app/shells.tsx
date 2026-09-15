@@ -1,6 +1,13 @@
 import { NavLink, Outlet, Link, useLocation } from 'react-router-dom'
 
-import { Avatar, Icon, LoadingState, ToneBadge, type IconName } from '../components/design-system'
+import {
+  Avatar,
+  Icon,
+  LoadingState,
+  RallyoBrand,
+  ToneBadge,
+  type IconName,
+} from '../components/design-system'
 import { detectEnvironment } from '../platform/environment'
 import { useAppSession } from './session'
 import { PlayerEntryPage } from './player-views'
@@ -15,10 +22,13 @@ const playerNav = [
 ]
 
 export function PublicShell() {
+  const location = useLocation()
+  const isEntry = location.pathname === '/app/open'
+
   return (
-    <div className="public-shell">
-      <PublicHeader />
-      <main>
+    <div className={`public-shell${isEntry ? ' public-shell-entry' : ''}`}>
+      <PublicHeader isEntry={isEntry} />
+      <main className={isEntry ? 'public-main public-main-entry' : 'public-main'}>
         <Outlet />
       </main>
     </div>
@@ -198,22 +208,25 @@ function AdminShell() {
   )
 }
 
-function PublicHeader() {
+function PublicHeader({ isEntry }: { readonly isEntry: boolean }) {
   return (
-    <header className="public-header">
-      <Link className="brand-lockup" to="/">
-        <span className="brand-mark" aria-hidden="true">
-          R
-        </span>
-        <span>Rallyo</span>
+    <header className={`public-header${isEntry ? ' public-header-entry' : ''}`}>
+      <Link className="public-header-brand" to="/" aria-label="Rallyo overview">
+        <RallyoBrand compact />
       </Link>
-      <nav className="public-nav" aria-label="Public navigation">
-        <a href="#how-it-works">How it works</a>
-        <a href="#for-communities">For communities</a>
-        <Link className="button button-small button-outline" to="/app/open">
-          Open Rallyo
+      {isEntry ? (
+        <Link className="public-header-back" to="/">
+          <span aria-hidden="true">←</span> Rallyo overview
         </Link>
-      </nav>
+      ) : (
+        <nav className="public-nav" aria-label="Public navigation">
+          <a href="#how-it-works">How Rallyo works</a>
+          <a href="#for-communities">For communities</a>
+          <Link className="button button-small button-outline" to="/app/open">
+            Open Rallyo
+          </Link>
+        </nav>
+      )}
     </header>
   )
 }

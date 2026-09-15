@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import { ErrorState, PageFrame, ToneBadge } from '../components/primitives'
+import { Icon, RallyoBrand } from '../components/design-system'
 import { useAppSession } from './session'
 import { PlayerEntryPage } from './player-views'
 
@@ -10,11 +11,17 @@ export function PublicHome() {
     <div className="landing-page">
       <section className="landing-hero">
         <div className="landing-hero-copy">
-          <p className="eyebrow">COMMUNITY COMPETITION, CONNECTED</p>
-          <h1>Turn your community into a live competition.</h1>
+          <div className="landing-kicker">
+            <span className="landing-kicker-index">01</span>
+            <p className="eyebrow">TELEGRAM-FIRST COMPETITION</p>
+          </div>
+          <h1>
+            Play the moment.
+            <span>Keep the record.</span>
+          </h1>
           <p className="landing-lede">
-            Games, contribution tasks, seasons, and rewards. One Rallyo identity across every
-            community you join.
+            Play and engage in Telegram. Track competition, communities, tasks, ranks, rewards, and
+            identity in Rallyo.
           </p>
           <div className="landing-actions">
             <Link className="button button-primary" to="/app/open">
@@ -24,68 +31,226 @@ export function PublicHome() {
               See how it works
             </a>
           </div>
+          <p className="landing-microcopy">
+            <Icon name="telegram" size={18} /> Games stay in Telegram. Wallet access stays optional.
+          </p>
         </div>
-        <div className="landing-proof" aria-label="Rallyo product preview">
-          <div className="proof-topline">
-            <span>LIVE COMMUNITY</span>
-            <span>SEASON 04</span>
+        <div className="landing-hero-visual">
+          <div className="landing-visual-label">
+            <RallyoBrand compact />
+            <span>ACTUAL APP ENTRY</span>
           </div>
-          <div className="proof-score">#04</div>
-          <p>Northstar Guild</p>
-          <div className="proof-row">
-            <span>Community points</span>
-            <strong>1,240</strong>
-          </div>
-          <div className="proof-row">
-            <span>Next action</span>
-            <strong>Task review</strong>
-          </div>
-          <div className="proof-stamp">RALLYO / ONE IDENTITY</div>
+          <figure className="landing-screen">
+            <picture>
+              <source media="(max-width: 640px)" srcSet="/screens/rallyo-entry-mobile.png" />
+              <img
+                src="/screens/rallyo-entry-desktop.png"
+                alt="Rallyo player entry screen with Telegram pairing and Nimiq Pay sign-in"
+              />
+            </picture>
+            <figcaption>
+              <span className="landing-caption-index">01</span>
+              <span>One entry surface for browser, Telegram pairing, and Nimiq Pay.</span>
+            </figcaption>
+          </figure>
         </div>
       </section>
+
       <section className="landing-section" id="how-it-works">
-        <div>
-          <p className="eyebrow">THE LOOP</p>
-          <h2>Play in Telegram. Keep the record in Rallyo.</h2>
+        <div className="landing-section-intro">
+          <div>
+            <p className="eyebrow">02 / THE MODEL</p>
+            <h2>The live game is in Telegram. The momentum stays in Rallyo.</h2>
+          </div>
+          <p>
+            Rallyo gives community participation a visible shape. The same Player identity carries
+            your records across the communities where you take part.
+          </p>
+        </div>
+        <div className="landing-model">
+          <div className="landing-game-list">
+            <div className="landing-subheading">
+              <span className="eyebrow">PLAY SURFACE</span>
+              <span>Telegram</span>
+            </div>
+            <LandingGame
+              accent="quiz"
+              detail="Project knowledge and first-correct races."
+              icon="list"
+              name="Quiz / Race"
+            />
+            <LandingGame
+              accent="scramble"
+              detail="Solve mixed-up project terms."
+              icon="game"
+              name="Scramble"
+            />
+            <LandingGame
+              accent="word-seek"
+              detail="Find the hidden word before the round ends."
+              icon="search"
+              name="Word Seek"
+            />
+          </div>
+          <div className="landing-record-panel">
+            <div className="landing-record-heading">
+              <span className="eyebrow">TRACKING SURFACE</span>
+              <Icon name="arrow-up-right" size={20} />
+            </div>
+            <div className="landing-record-title">
+              <span className="landing-record-mark">R</span>
+              <strong>One Rallyo Player</strong>
+            </div>
+            <p>Separate community records, one identity.</p>
+            <div className="landing-record-list">
+              <RecordLine label="Community seasons" detail="Real points and ranks by community" />
+              <RecordLine label="Contribution tasks" detail="Proof, review, and status" />
+              <RecordLine label="Rewards" detail="Optional wallet-backed claims" />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="landing-section landing-loop-section">
+        <div className="landing-section-intro landing-section-intro-loop">
+          <div>
+            <p className="eyebrow">03 / THE LOOP</p>
+            <h2>A simple loop for real participation.</h2>
+          </div>
+          <p>Each step leaves a useful record for the player and the community.</p>
         </div>
         <div className="loop-grid">
-          <LoopStep number="01" title="Play" detail="Race through the enabled community games." />
-          <LoopStep
-            number="02"
-            title="Contribute"
-            detail="Complete tasks and submit proof for review."
-          />
-          <LoopStep
-            number="03"
-            title="Climb"
-            detail="See your real rank and points by community."
-          />
+          <LoopStep number="01" title="Play" detail="Answer enabled games in Telegram." />
+          <LoopStep number="02" title="Contribute" detail="Complete real community tasks." />
+          <LoopStep number="03" title="Climb" detail="Follow rank and points by season." />
           <LoopStep
             number="04"
-            title="Claim"
-            detail="Link Nimiq when wallet-backed rewards are ready."
+            title="Earn"
+            detail="Claim rewards when the community enables them."
           />
         </div>
       </section>
+
       <section className="landing-section landing-section-dark" id="for-communities">
-        <p className="eyebrow">FOR COMMUNITIES</p>
-        <h2>One control surface for the arena you already run.</h2>
-        <div className="landing-admin-row">
-          <span>01</span>
-          <strong>Enable games and set the season</strong>
-          <span>Telegram + Rallyo</span>
+        <div className="landing-section-intro landing-section-intro-dark">
+          <div>
+            <p className="eyebrow">04 / FOR COMMUNITIES</p>
+            <h2>Give participation a place to go.</h2>
+          </div>
+          <p>
+            Community admins keep the arena focused: enable games, run seasons, publish tasks, and
+            decide whether rewards belong in the loop.
+          </p>
         </div>
-        <div className="landing-admin-row">
-          <span>02</span>
-          <strong>Publish contribution tasks</strong>
-          <span>Reviewable proof</span>
-        </div>
-        <div className="landing-admin-row">
-          <span>03</span>
-          <strong>Keep rewards optional and truthful</strong>
-          <span>Nimiq when useful</span>
+        <div className="landing-admin-list">
+          <AdminRow
+            index="01"
+            title="Enable the games your community wants to play."
+            detail="Quiz / Race · Scramble · Word Seek"
+          />
+          <AdminRow
+            index="02"
+            title="Run seasons with a clear community leaderboard."
+            detail="Community-scoped points and ranks"
+          />
+          <AdminRow
+            index="03"
+            title="Publish contribution tasks with reviewable proof."
+            detail="Social tasks and manual review"
+          />
+          <AdminRow
+            index="04"
+            title="Keep wallet-backed rewards optional."
+            detail="Nimiq when it adds something"
+          />
         </div>
       </section>
+
+      <section className="landing-section landing-nimiq-section">
+        <div className="landing-nimiq-copy">
+          <p className="eyebrow">05 / NIMIQ PAY</p>
+          <h2>Wallet when it helps. Rallyo always comes first.</h2>
+          <p>
+            Rallyo runs inside Nimiq Pay for wallet-backed entry and reward actions. Telegram
+            players can participate, rank, and connect a wallet later. No email or password is
+            needed for normal player entry.
+          </p>
+          <Link className="button button-primary" to="/app/open">
+            Open Rallyo
+          </Link>
+        </div>
+        <div className="landing-nimiq-note">
+          <div className="landing-nimiq-note-mark">
+            <Icon name="wallet" size={24} />
+          </div>
+          <div>
+            <strong>Two ways in</strong>
+            <p>Pair Telegram in a browser, or continue with Nimiq Pay inside its Mini App.</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="landing-final-cta">
+        <p className="eyebrow">06 / YOUR TURN</p>
+        <h2>Join the record your community is building.</h2>
+        <Link className="button button-primary" to="/app/open">
+          Open Rallyo
+        </Link>
+      </section>
+    </div>
+  )
+}
+
+function LandingGame({
+  accent,
+  detail,
+  icon,
+  name,
+}: {
+  readonly accent: 'quiz' | 'scramble' | 'word-seek'
+  readonly detail: string
+  readonly icon: 'list' | 'game' | 'search'
+  readonly name: string
+}) {
+  return (
+    <div className={`landing-game landing-game-${accent}`}>
+      <span className="landing-game-icon">
+        <Icon name={icon} size={20} />
+      </span>
+      <div>
+        <strong>{name}</strong>
+        <p>{detail}</p>
+      </div>
+      <span className="landing-game-arrow" aria-hidden="true">
+        ↗
+      </span>
+    </div>
+  )
+}
+
+function RecordLine({ detail, label }: { readonly detail: string; readonly label: string }) {
+  return (
+    <div className="landing-record-line">
+      <strong>{label}</strong>
+      <span>{detail}</span>
+    </div>
+  )
+}
+
+function AdminRow({
+  detail,
+  index,
+  title,
+}: {
+  readonly detail: string
+  readonly index: string
+  readonly title: string
+}) {
+  return (
+    <div className="landing-admin-row">
+      <span>{index}</span>
+      <strong>{title}</strong>
+      <span>{detail}</span>
     </div>
   )
 }
@@ -119,12 +284,13 @@ export function OpenSessionPage() {
 
   if (state === 'exchanging') {
     return (
-      <div className="entry-gate">
+      <div className="entry-gate public-entry-state">
         <div className="entry-card">
+          <RallyoBrand />
           <p className="eyebrow">ONE-TIME HANDOFF</p>
           <h1>Opening your Rallyo session.</h1>
           <p>
-            This link is being exchanged for a secure app session. Wallet access is not part of
+            This link is being exchanged for a secure app session. Wallet access is not part of this
             login.
           </p>
         </div>
@@ -133,15 +299,20 @@ export function OpenSessionPage() {
   }
   if (state === 'error') {
     return (
-      <div className="entry-gate">
+      <div className="entry-gate public-entry-state">
         <div className="entry-card">
           <ErrorState
-            title="This Rallyo link has expired."
-            detail={error ?? 'Open a fresh link from Telegram.'}
+            title="This one-time link could not be opened."
+            detail={error ?? 'Open a fresh link from Telegram and try again.'}
           />
-          <Link className="button button-outline" to="/">
-            Return to Rallyo
-          </Link>
+          <div className="entry-state-actions">
+            <Link className="button button-primary" to="/app/open">
+              Enter a pairing code
+            </Link>
+            <Link className="button button-outline" to="/">
+              Return to Rallyo
+            </Link>
+          </div>
         </div>
       </div>
     )
