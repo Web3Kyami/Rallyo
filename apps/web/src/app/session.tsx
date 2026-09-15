@@ -20,7 +20,9 @@ export function SessionProvider({ children }: { readonly children: React.ReactNo
 
   const refresh = async () => {
     try {
-      setState({ status: 'loading', data: null, error: null })
+      setState((current) =>
+        current.status === 'ready' ? current : { status: 'loading', data: null, error: null },
+      )
       const data = await api.bootstrap()
       setState({ status: 'ready', data, error: null })
     } catch (error) {

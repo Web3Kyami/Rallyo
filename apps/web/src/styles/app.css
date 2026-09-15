@@ -2912,4 +2912,9 @@
   .league-focus {
     padding: 16px;
   }
+
+  .player-task-tabs button {
+    padding-inline: 7px;
+    font-size: 14px;
+  }
 }

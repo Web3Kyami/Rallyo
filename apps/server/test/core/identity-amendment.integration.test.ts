@@ -388,6 +388,14 @@ describeDatabase('Phase 8 identity amendment against PostgreSQL', () => {
       endsAt: new Date(now.getTime() + 60 * 60_000),
       createdByTelegramUserId: 6001n,
     })
+    await db.insert(schema.rewardEntitlements).values({
+      seasonId: ids.seasonOne,
+      playerId: ids.telegramPlayer,
+      rank: 1,
+      amountLuna: 100n,
+      idempotencyKey: 'reward:app-api-context',
+      status: 'ELIGIBLE',
+    })
     const actor = {
       sessionId: '60000000-0000-4000-8000-000000000071',
       playerId: ids.telegramPlayer,
@@ -407,6 +415,15 @@ describeDatabase('Phase 8 identity amendment against PostgreSQL', () => {
         expect.objectContaining({ id: ids.communityTwo, isAdmin: true }),
       ]),
     )
+    await expect(appApi.rewards(actor)).resolves.toEqual({
+      wallet: { linked: false },
+      entitlements: [
+        expect.objectContaining({
+          communityTitle: 'History community',
+          seasonName: 'Identity season',
+        }),
+      ],
+    })
 
     const walletActor = {
       ...actor,

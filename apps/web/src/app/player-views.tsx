@@ -230,12 +230,8 @@ export function PlayerEntryPage() {
                 onAuthenticated={onWalletAuthenticated}
                 variant="secondary"
                 label="Continue with Nimiq Pay"
+                disabledReason="Open Rallyo inside Nimiq Pay to use wallet-backed entry."
               />
-              {!environment.isWalletProviderAvailable ? (
-                <p className="entry-note">
-                  Open Rallyo inside Nimiq Pay to use wallet-backed entry.
-                </p>
-              ) : null}
             </>
           )}
         </div>
@@ -249,11 +245,13 @@ export function PlayerEntryPage() {
 }
 
 function WalletSignInButton({
+  disabledReason,
   enabled,
   label = 'Continue with Nimiq Pay',
   onAuthenticated,
   variant = 'primary',
 }: {
+  readonly disabledReason?: string
   readonly enabled: boolean
   readonly label?: string
   readonly onAuthenticated: (redirectPath: string) => Promise<void>
@@ -296,6 +294,7 @@ function WalletSignInButton({
         icon="wallet"
         loading={state === 'signing'}
         disabled={!enabled}
+        title={!enabled ? disabledReason : undefined}
         onClick={() => void signIn()}
       >
         {state === 'signing' ? 'Signing in' : label}
@@ -305,6 +304,7 @@ function WalletSignInButton({
           {error}
         </p>
       ) : null}
+      {!enabled && disabledReason ? <p className="entry-note">{disabledReason}</p> : null}
     </div>
   )
 }
@@ -1155,6 +1155,7 @@ export function PlayerTasksPage() {
       detail="Complete real community tasks, then track the review state of each submission."
     >
       <Tabs
+        className="player-task-tabs"
         items={[
           { value: 'available', label: 'Available' },
           { value: 'pending', label: 'Pending' },
@@ -1649,6 +1650,7 @@ export function PlayerRewardsPage() {
               enabled={detectEnvironment().isWalletProviderAvailable}
               onAuthenticated={startWalletLink}
               label="Link with Nimiq Pay"
+              disabledReason="Open Rallyo inside Nimiq Pay to link a wallet."
             />
           }
         />
@@ -1729,9 +1731,9 @@ function RewardRow({ reward }: { readonly reward: AppRewards['entitlements'][num
     <article className="reward-row">
       <div className="reward-rank">#{reward.rank}</div>
       <div className="reward-copy">
-        <strong>Season reward</strong>
+        <strong>{reward.communityTitle}</strong>
         <span>
-          Season {reward.seasonId.slice(0, 8)} · {formatDate(reward.createdAt)}
+          {reward.seasonName} · {formatDate(reward.createdAt)}
         </span>
       </div>
       <strong className="reward-amount">

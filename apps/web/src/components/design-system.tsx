@@ -228,10 +228,12 @@ export function SectionLabel({ children }: { readonly children: ReactNode }) {
 }
 
 export function Tabs({
+  className = '',
   items,
   onChange,
   value,
 }: {
+  readonly className?: string
   readonly items: readonly {
     readonly value: string
     readonly label: string
@@ -241,7 +243,11 @@ export function Tabs({
   readonly value: string
 }) {
   return (
-    <div className="ds-tabs" role="tablist" aria-label="View options">
+    <div
+      className={`ds-tabs${className ? ` ${className}` : ''}`}
+      role="tablist"
+      aria-label="View options"
+    >
       {items.map((item) => (
         <button
           aria-selected={item.value === value}

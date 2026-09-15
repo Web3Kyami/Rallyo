@@ -194,6 +194,8 @@ export type AppCommunityDetail = {
 export type AppRewardEntitlement = {
   readonly id: string
   readonly seasonId: string
+  readonly communityTitle: string
+  readonly seasonName: string
   readonly rank: number
   readonly amountLuna: string
   readonly status: string

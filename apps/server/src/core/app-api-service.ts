@@ -277,6 +277,8 @@ export class AppApiService {
       .select({
         id: schema.rewardEntitlements.id,
         seasonId: schema.rewardEntitlements.seasonId,
+        communityTitle: schema.communities.title,
+        seasonName: schema.seasons.name,
         rank: schema.rewardEntitlements.rank,
         amountLuna: schema.rewardEntitlements.amountLuna,
         status: schema.rewardEntitlements.status,
@@ -284,6 +286,8 @@ export class AppApiService {
         createdAt: schema.rewardEntitlements.createdAt,
       })
       .from(schema.rewardEntitlements)
+      .innerJoin(schema.seasons, eq(schema.rewardEntitlements.seasonId, schema.seasons.id))
+      .innerJoin(schema.communities, eq(schema.seasons.communityId, schema.communities.id))
       .where(eq(schema.rewardEntitlements.playerId, actor.playerId))
       .orderBy(desc(schema.rewardEntitlements.createdAt))
     return {
