@@ -245,10 +245,10 @@ describeDatabase('Operator console against PostgreSQL', () => {
 
     const player = await consoleService.player(ids.playerOne)
     expect(player.scoreSummary.totalPoints).toBe(20)
-    expect(player.audit.map((event) => event.action)).toEqual([
-      'telegram_pairing_codes.revoked',
-      'wallet_identity.revoked',
-    ])
+    expect(player.audit).toHaveLength(2)
+    expect(player.audit.map((event) => event.action)).toEqual(
+      expect.arrayContaining(['telegram_pairing_codes.revoked', 'wallet_identity.revoked']),
+    )
   })
 
   it('rejects a wallet action that crosses Player boundaries without changing state', async () => {

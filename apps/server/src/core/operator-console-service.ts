@@ -344,7 +344,7 @@ export class OperatorConsoleService {
         })
         .from(schema.operatorAuditEvents)
         .where(eq(schema.operatorAuditEvents.targetPlayerId, playerId))
-        .orderBy(desc(schema.operatorAuditEvents.createdAt))
+        .orderBy(desc(schema.operatorAuditEvents.createdAt), desc(schema.operatorAuditEvents.id))
         .limit(20),
     ])
 
