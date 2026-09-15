@@ -1851,3 +1851,1065 @@
     margin-top: 16px;
   }
 }
+
+/* Player surfaces */
+
+.player-entry-gate {
+  align-items: start;
+  padding: 32px 20px;
+}
+
+.player-entry-card {
+  display: grid;
+  gap: 0;
+  width: min(100%, 620px);
+  padding: 32px;
+}
+
+.player-entry-card > .rallyo-brand {
+  margin-bottom: 28px;
+}
+
+.player-entry-eyebrow {
+  margin-bottom: 0;
+}
+
+.player-entry-card h1 {
+  max-width: 540px;
+  margin-bottom: 16px;
+}
+
+.entry-intro {
+  max-width: 540px;
+}
+
+.entry-primary-method,
+.entry-secondary-method {
+  display: grid;
+  gap: 10px;
+  margin-top: 24px;
+  padding: 18px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-card);
+}
+
+.entry-primary-method {
+  background: var(--rallyo-soft);
+}
+
+.entry-primary-method.is-wallet {
+  background: var(--rallyo-soft);
+  box-shadow: var(--shadow-primary);
+}
+
+.entry-secondary-method {
+  background: var(--surface-muted);
+}
+
+.entry-code-form {
+  display: grid;
+  gap: 8px;
+}
+
+.entry-code-form label,
+.pair-form label {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.entry-code-form input,
+.pair-form input {
+  width: 100%;
+  min-height: 52px;
+  padding: 0 14px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+}
+
+.entry-code-form .ds-button,
+.wallet-entry-control .ds-button {
+  width: 100%;
+}
+
+.wallet-entry-control {
+  display: grid;
+  gap: 8px;
+}
+
+.entry-form-error {
+  margin: 2px 0 0;
+  color: var(--danger);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.entry-security-note {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-quiet);
+}
+
+.player-identity-panel,
+.profile-hero,
+.profile-method,
+.wallet-summary,
+.community-detail-header,
+.home-current-record,
+.profile-community-summary,
+.rewards-section,
+.pair-explainer,
+.pair-form,
+.task-detail-main,
+.task-detail-aside,
+.league-focus {
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.player-identity-panel {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 20px;
+}
+
+.player-identity-panel h2,
+.profile-hero h2,
+.profile-method h2,
+.wallet-summary h2,
+.home-section-heading h2,
+.community-detail-heading h2,
+.league-focus-heading h2,
+.task-detail-aside h2,
+.rewards-section h2 {
+  margin: 3px 0 0;
+  font-family: var(--font-display);
+  font-size: 25px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.player-identity-panel p,
+.profile-hero p,
+.profile-method p,
+.wallet-summary p,
+.community-detail-heading p,
+.league-focus-heading p,
+.task-detail-aside p {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+}
+
+.identity-methods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.status-banner,
+.player-identity-panel + .status-banner,
+.home-current-record + .status-banner {
+  margin-top: 16px;
+}
+
+.home-current-record {
+  margin-top: 16px;
+  padding: 20px;
+  background: var(--rallyo-soft);
+}
+
+.home-section {
+  margin-top: 32px;
+}
+
+.home-section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.home-section-heading.compact {
+  align-items: center;
+}
+
+.home-section-heading h2 {
+  margin-top: 4px;
+}
+
+.home-section-heading p {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+}
+
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.home-current-record > .rank-block {
+  margin-top: 20px;
+}
+
+.home-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.home-action-panel {
+  display: grid;
+  min-height: 112px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.home-action-link {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.home-action-link:hover {
+  background: var(--surface-muted);
+}
+
+.home-action-link strong,
+.home-action-link small {
+  display: block;
+}
+
+.home-action-link strong {
+  font-size: 17px;
+}
+
+.home-action-link small,
+.home-action-empty span {
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.home-action-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-control);
+}
+
+.home-action-icon-task {
+  background: var(--quiz);
+}
+
+.home-action-icon-reward {
+  background: var(--scramble);
+}
+
+.home-action-empty {
+  display: block;
+  min-height: 0;
+  grid-column: 1 / -1;
+}
+
+.loading-lines {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 10px;
+  padding: 18px;
+  border: 2px dashed var(--border-muted);
+  border-radius: var(--radius-card);
+  background: var(--surface-muted);
+}
+
+.loading-lines-mark {
+  width: 16px;
+  height: 16px;
+  grid-row: span 2;
+  border: 2px solid var(--ink);
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: rallyo-spin 700ms linear infinite;
+}
+
+.loading-lines strong {
+  font-size: 16px;
+}
+
+.loading-lines small {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.game-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.game-strip .game-card {
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+}
+
+.game-strip .game-card-icon {
+  width: 44px;
+  height: 44px;
+}
+
+.game-strip .game-card-heading {
+  display: block;
+}
+
+.game-strip .game-card-heading .tone-badge {
+  margin-top: 6px;
+}
+
+.home-lower-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  gap: 16px;
+}
+
+.home-lower-grid.home-section {
+  margin-top: 32px;
+}
+
+.home-activity-panel,
+.home-wallet-panel {
+  min-width: 0;
+}
+
+.home-activity-panel .state-card {
+  margin-top: 16px;
+}
+
+.home-wallet-panel h2 {
+  margin: 14px 0 0;
+  font-family: var(--font-display);
+  font-size: 27px;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.home-wallet-panel p {
+  margin: 10px 0 16px;
+  color: var(--text-muted);
+}
+
+.community-list-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.community-card-action .inline-actions {
+  justify-content: flex-start;
+}
+
+.player-back-link {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 16px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+  text-underline-offset: 4px;
+}
+
+.player-back-link svg {
+  transform: rotate(180deg);
+}
+
+.community-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px;
+  margin-bottom: 16px;
+}
+
+.community-detail-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+}
+
+.community-detail-heading > div {
+  min-width: 0;
+}
+
+.community-detail-heading h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.community-tab-panel {
+  margin-top: 18px;
+}
+
+.detail-game-list,
+.task-list,
+.reward-list {
+  display: grid;
+  gap: 12px;
+}
+
+.player-task-card {
+  padding: 16px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.player-task-instructions {
+  margin: 14px 0 0;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.task-detail-layout,
+.pair-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  gap: 16px;
+}
+
+.task-detail-main,
+.task-detail-aside,
+.pair-explainer,
+.pair-form {
+  padding: 20px;
+}
+
+.task-detail-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.task-detail-points {
+  font-family: var(--font-display);
+  font-size: 30px;
+  letter-spacing: -0.04em;
+}
+
+.task-detail-copy {
+  margin: 28px 0;
+}
+
+.task-detail-copy p {
+  margin: 9px 0 0;
+  font-size: 17px;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+.task-detail-aside h2 {
+  margin-bottom: 14px;
+}
+
+.detail-facts {
+  display: grid;
+  gap: 0;
+  margin: 22px 0;
+  border-top: 1px solid var(--border-quiet);
+}
+
+.detail-facts div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border-quiet);
+}
+
+.detail-facts dt {
+  color: var(--text-muted);
+}
+
+.detail-facts dd {
+  margin: 0;
+  font-weight: 700;
+  text-align: right;
+}
+
+.submission-state {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 2px solid var(--ink);
+}
+
+.submission-state p {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.submission-reference {
+  overflow-wrap: anywhere;
+}
+
+.pair-steps {
+  display: grid;
+  gap: 0;
+  margin: 18px 0 24px;
+  padding: 0;
+  list-style: none;
+}
+
+.pair-steps li {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border-quiet);
+}
+
+.pair-steps li:last-child {
+  border-bottom: 1px solid var(--border-quiet);
+}
+
+.pair-steps li > span {
+  color: var(--rallyo);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.pair-steps p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.pair-form {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  background: var(--rallyo-soft);
+}
+
+.pair-form .ds-button {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.pair-success {
+  margin: 4px 0 0;
+  color: var(--success);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.profile-hero {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 20px;
+  background: var(--rallyo-soft);
+  box-shadow: var(--shadow-primary);
+}
+
+.profile-hero h2 {
+  font-size: 32px;
+}
+
+.profile-method,
+.wallet-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 18px;
+}
+
+.profile-method-icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-control);
+  background: #d8e2ff;
+}
+
+.profile-wallet-icon {
+  background: var(--quiz);
+}
+
+.profile-community-summary,
+.rewards-section {
+  margin-top: 16px;
+  padding: 18px;
+}
+
+.profile-community-list {
+  display: grid;
+  gap: 0;
+  margin-top: 12px;
+  border-top: 1px solid var(--border-quiet);
+}
+
+.profile-community-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  border-bottom: 1px solid var(--border-quiet);
+  text-decoration: none;
+}
+
+.profile-community-row > span:nth-child(2) {
+  min-width: 0;
+}
+
+.profile-community-row strong,
+.profile-community-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-community-row small {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.profile-community-row b {
+  font-family: var(--font-display);
+  font-size: 20px;
+}
+
+.avatar-onboarding-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.page-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.avatar-picker {
+  display: grid;
+  gap: 20px;
+  max-width: 680px;
+}
+
+.avatar-picker-preview {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 20px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-card);
+  background: var(--rallyo-soft);
+}
+
+.avatar-picker-preview strong {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-display);
+  font-size: 25px;
+}
+
+.avatar-picker-preview p {
+  max-width: 420px;
+  margin: 6px 0 0;
+  color: var(--text-muted);
+}
+
+.avatar-option-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.avatar-option {
+  display: grid;
+  min-height: 150px;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 12px 8px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.avatar-option:hover {
+  background: var(--surface-muted);
+}
+
+.avatar-option.is-selected {
+  background: var(--lime-highlight);
+  box-shadow: var(--shadow-secondary);
+}
+
+.avatar-option svg {
+  color: var(--success);
+}
+
+.league-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.72fr) minmax(0, 1.28fr);
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.league-community-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.league-community-choice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 72px;
+  padding: 10px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+}
+
+.league-community-choice:hover,
+.league-community-choice.is-selected {
+  background: var(--rallyo-soft);
+}
+
+.league-community-choice.is-selected {
+  box-shadow: var(--shadow-secondary);
+}
+
+.league-community-choice > span:nth-child(2) {
+  min-width: 0;
+}
+
+.league-community-choice strong,
+.league-community-choice small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.league-community-choice small {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.league-community-choice b {
+  font-family: var(--font-display);
+  font-size: 21px;
+}
+
+.league-focus {
+  min-width: 0;
+  padding: 20px;
+}
+
+.league-focus-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.league-focus-season {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 20px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border-quiet);
+  border-bottom: 1px solid var(--border-quiet);
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.league-focus-season strong {
+  color: var(--ink);
+}
+
+.league-podium {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.league-podium-item {
+  display: grid;
+  min-width: 0;
+  min-height: 170px;
+  place-items: center;
+  align-content: center;
+  gap: 7px;
+  padding: 12px 8px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-card);
+  background: var(--surface-muted);
+  text-align: center;
+}
+
+.league-podium-item-1 {
+  min-height: 196px;
+  background: var(--lime-highlight);
+}
+
+.league-podium-item-2 {
+  background: var(--quiz);
+}
+
+.league-podium-item-3 {
+  background: var(--word-seek);
+}
+
+.league-podium-rank {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.league-podium-item strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.league-podium-item b {
+  font-family: var(--font-display);
+  font-size: 20px;
+}
+
+.league-podium-item small {
+  font-family: var(--font-body);
+  font-size: 12px;
+}
+
+.league-rest-list {
+  margin-top: 12px;
+}
+
+.reward-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto minmax(100px, auto) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border-quiet);
+}
+
+.reward-rank {
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+
+.reward-copy strong,
+.reward-copy span {
+  display: block;
+}
+
+.reward-copy span {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.reward-amount {
+  font-family: var(--font-display);
+  font-size: 23px;
+  white-space: nowrap;
+}
+
+.reward-amount small {
+  font-family: var(--font-body);
+  font-size: 12px;
+}
+
+.reward-status {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}
+
+.reward-status code {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .home-lower-grid,
+  .task-detail-layout,
+  .pair-layout,
+  .league-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .game-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .community-list-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .reward-row {
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+  }
+
+  .reward-status,
+  .reward-row > .ds-button {
+    grid-column: 2 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .player-entry-gate {
+    padding: 16px;
+  }
+
+  .player-entry-card {
+    padding: 20px;
+  }
+
+  .player-entry-card > .rallyo-brand {
+    margin-bottom: 22px;
+  }
+
+  .player-identity-panel,
+  .profile-hero {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .player-identity-panel > .button,
+  .profile-hero > .button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .home-section-heading,
+  .league-focus-heading {
+    align-items: flex-start;
+  }
+
+  .home-section-heading:not(.compact),
+  .league-focus-heading {
+    display: block;
+  }
+
+  .home-section-heading .inline-actions,
+  .league-focus-heading .button {
+    margin-top: 12px;
+  }
+
+  .home-action-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .home-action-empty {
+    grid-column: auto;
+  }
+
+  .community-detail-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .avatar-onboarding-actions,
+  .avatar-picker-preview {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .avatar-onboarding-actions .ds-button {
+    width: 100%;
+  }
+
+  .avatar-option-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .profile-method,
+  .wallet-summary {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .profile-method > .ds-button,
+  .profile-method > .button,
+  .wallet-summary > .button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .reward-row {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .reward-amount,
+  .reward-status,
+  .reward-row > .ds-button {
+    grid-column: 2;
+  }
+
+  .reward-amount {
+    margin-top: 4px;
+  }
+
+  .task-detail-main,
+  .task-detail-aside,
+  .pair-explainer,
+  .pair-form,
+  .league-focus {
+    padding: 16px;
+  }
+}

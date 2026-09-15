@@ -48,6 +48,22 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   bootstrap: () => request<AppBootstrap>('/api/app/me'),
+  listCommunities: () =>
+    request<{ readonly communities: readonly AppCommunity[] }>('/api/app/communities'),
+  community: (communityId: string) =>
+    request<AppCommunityDetail>(`/api/app/communities/${encodeURIComponent(communityId)}`),
+  leaderboard: (communityId: string) =>
+    request<{ readonly leaderboard: readonly AppLeaderboardEntry[] }>(
+      `/api/app/communities/${encodeURIComponent(communityId)}/leaderboard`,
+    ),
+  tasks: (communityId?: string) =>
+    request<{ readonly tasks: readonly AppTask[] }>(
+      communityId
+        ? `/api/app/tasks?communityId=${encodeURIComponent(communityId)}`
+        : '/api/app/tasks',
+    ),
+  task: (taskId: string) => request<AppTaskDetail>(`/api/app/tasks/${encodeURIComponent(taskId)}`),
+  rewards: () => request<AppRewards>('/api/app/rewards'),
   exchangeSession: (code: string) =>
     request<{ readonly redirectPath: string }>('/api/app/session/exchange', {
       method: 'POST',
@@ -100,6 +116,94 @@ export type AppCommunity = {
   readonly points: number
   readonly rank: number | null
   readonly isAdmin: boolean
+}
+
+export type AppGameCapability = {
+  readonly gameKey: string
+  readonly enabled: boolean
+}
+
+export type AppLeaderboardEntry = {
+  readonly playerId: string
+  readonly displayName: string
+  readonly points: number
+  readonly rank: number
+  readonly isCurrentPlayer: boolean
+}
+
+export type AppTaskSubmission = {
+  readonly id?: string
+  readonly taskId?: string
+  readonly playerId?: string
+  readonly reference?: string
+  readonly status: 'PENDING' | 'APPROVED' | 'REJECTED'
+  readonly createdAt: string
+  readonly reviewedAt?: string | null
+  readonly rejectionReason?: string | null
+}
+
+export type AppTask = {
+  readonly id: string
+  readonly communityId: string
+  readonly communityTitle: string
+  readonly title: string
+  readonly instructions: string
+  readonly points: number
+  readonly startsAt: string
+  readonly endsAt: string
+  readonly submission: Pick<AppTaskSubmission, 'taskId' | 'status' | 'createdAt'> | null
+}
+
+export type AppTaskDetail = {
+  readonly id: string
+  readonly communityId: string
+  readonly communityTitle: string
+  readonly title: string
+  readonly instructions: string
+  readonly points: number
+  readonly startsAt: string
+  readonly endsAt: string
+  readonly maxSubmissionsPerPlayer: number | null
+  readonly cooldownDays: number
+  readonly status: string
+  readonly isOpen: boolean
+  readonly submission: AppTaskSubmission | null
+}
+
+export type AppCommunityDetail = {
+  readonly id: string
+  readonly title: string
+  readonly slug: string
+  readonly status: string
+  readonly timezone: string
+  readonly activeSeason: {
+    readonly id: string
+    readonly name: string
+    readonly startsAt: string
+    readonly endsAt: string
+  } | null
+  readonly player: {
+    readonly points: number
+    readonly rank: number | null
+  }
+  readonly leaderboard: readonly AppLeaderboardEntry[]
+  readonly games: readonly AppGameCapability[]
+  readonly tasks: readonly AppTask[]
+}
+
+export type AppRewardEntitlement = {
+  readonly id: string
+  readonly seasonId: string
+  readonly rank: number
+  readonly amountLuna: string
+  readonly status: string
+  readonly transactionHash: string | null
+  readonly createdAt: string
+}
+
+export type AppRewards = {
+  readonly wallet: { readonly linked: true; readonly address: string } | { readonly linked: false }
+  readonly entitlements: readonly AppRewardEntitlement[]
 }
 
 export type AppBootstrap = {

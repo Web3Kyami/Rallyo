@@ -3,6 +3,8 @@ import { NavLink, Outlet, Link, useLocation } from 'react-router-dom'
 import { Avatar, Icon, LoadingState, ToneBadge, type IconName } from '../components/design-system'
 import { detectEnvironment } from '../platform/environment'
 import { useAppSession } from './session'
+import { PlayerEntryPage } from './player-views'
+import { getStoredAvatarId } from './player-data'
 
 const playerNav = [
   { to: '/app', label: 'Home', icon: 'home' as IconName, end: true },
@@ -215,7 +217,9 @@ function MobileHeader({ admin = false }: { readonly admin?: boolean }) {
   const session = useAppSession()
   const title = admin
     ? 'Admin control'
-    : (playerNav.find((item) => location.pathname === item.to)?.label ?? 'Rallyo')
+    : (playerNav.find((item) =>
+        item.end ? location.pathname === item.to : location.pathname.startsWith(item.to),
+      )?.label ?? 'Rallyo')
   return (
     <header className="mobile-header">
       <Link className="brand-lockup" to={admin ? '/app/admin' : '/app'}>
@@ -228,6 +232,7 @@ function MobileHeader({ admin = false }: { readonly admin?: boolean }) {
         <span className="eyebrow">{title}</span>
       </div>
       <Avatar
+        avatarId={session.status === 'ready' ? getStoredAvatarId() : 'neutral-01'}
         name={session.status === 'ready' ? session.data.player.displayName : 'Player'}
         size="xs"
       />
@@ -261,30 +266,7 @@ function AppNavLink({
 }
 
 function EntryGate() {
-  const environment = detectEnvironment()
-  return (
-    <div className="entry-gate">
-      <div className="entry-card">
-        <p className="eyebrow">RALLYO PLAYER APP</p>
-        <h1>Enter Rallyo your way.</h1>
-        <p>
-          Continue with Nimiq Pay when it is available, or use your Telegram identity. Wallet access
-          stays optional for play, rank, tasks, and community competition.
-        </p>
-        <div className="entry-actions">
-          <Link className="button button-primary" to="/app/open">
-            Choose sign-in method
-          </Link>
-          <Link className="button button-outline" to="/">
-            Explore Rallyo
-          </Link>
-        </div>
-        <p className="entry-note">
-          Current environment: {environment.host === 'nimiq-pay' ? 'Nimiq Pay' : 'browser'}.
-        </p>
-      </div>
-    </div>
-  )
+  return <PlayerEntryPage />
 }
 
 function ForbiddenGate() {

@@ -8,14 +8,20 @@ import {
 
 import { AdminGate, OperatorBoundary, PlayerGate, PublicShell } from './shells'
 import { DesignShowcasePage } from './design-showcase'
+import { AdminRoutePlaceholder, OpenSessionPage, PublicHome } from './route-views'
 import {
-  AdminRoutePlaceholder,
-  OpenSessionPage,
-  PlayerHome,
-  PlayerProfile,
-  PlayerRoutePlaceholder,
-  PublicHome,
-} from './route-views'
+  PlayerAvatarOnboardingPage,
+  PlayerCommunitiesPage,
+  PlayerCommunityDetailPage,
+  PlayerEntryPage,
+  PlayerHomePage,
+  PlayerLeaguePage,
+  PlayerPairPage,
+  PlayerProfilePage,
+  PlayerRewardsPage,
+  PlayerTaskDetailPage,
+  PlayerTasksPage,
+} from './player-views'
 
 export const router = createBrowserRouter([
   {
@@ -35,67 +41,17 @@ export const router = createBrowserRouter([
     element: <PlayerGate />,
     errorElement: <RouteErrorBoundary />,
     children: [
-      { index: true, element: <PlayerHome /> },
-      {
-        path: 'league',
-        element: (
-          <PlayerRoutePlaceholder
-            title="League"
-            detail="The real community competition surfaces will land here without inventing global Rallyo XP."
-          />
-        ),
-      },
-      {
-        path: 'tasks',
-        element: (
-          <PlayerRoutePlaceholder
-            title="Tasks"
-            detail="Contribution tasks will show the real community proof and review state."
-          />
-        ),
-      },
-      {
-        path: 'tasks/:taskId',
-        element: (
-          <PlayerRoutePlaceholder
-            eyebrow="TASK DETAIL"
-            title="Task detail"
-            detail="This deep link is reserved for the real task submission flow."
-          />
-        ),
-      },
-      {
-        path: 'communities',
-        element: (
-          <PlayerRoutePlaceholder
-            title="Communities"
-            detail="Your separate community records will be collected here."
-          />
-        ),
-      },
-      {
-        path: 'communities/:communityId',
-        element: (
-          <PlayerRoutePlaceholder
-            eyebrow="COMMUNITY RECORD"
-            title="Community detail"
-            detail="Leaderboard, games, tasks, and rewards will share this community boundary."
-          />
-        ),
-      },
-      {
-        path: 'me',
-        element: <PlayerProfile />,
-      },
-      {
-        path: 'rewards',
-        element: (
-          <PlayerRoutePlaceholder
-            title="Wallet and rewards"
-            detail="Wallet linking remains optional. Claims will use the existing verified Nimiq path."
-          />
-        ),
-      },
+      { index: true, element: <PlayerHomePage /> },
+      { path: 'start', element: <PlayerEntryPage /> },
+      { path: 'pair', element: <PlayerPairPage /> },
+      { path: 'onboarding/avatar', element: <PlayerAvatarOnboardingPage /> },
+      { path: 'league', element: <PlayerLeaguePage /> },
+      { path: 'tasks', element: <PlayerTasksPage /> },
+      { path: 'tasks/:taskId', element: <PlayerTaskDetailPage /> },
+      { path: 'communities', element: <PlayerCommunitiesPage /> },
+      { path: 'communities/:communityId', element: <PlayerCommunityDetailPage /> },
+      { path: 'me', element: <PlayerProfilePage /> },
+      { path: 'rewards', element: <PlayerRewardsPage /> },
     ],
   },
   {
