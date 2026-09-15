@@ -219,4 +219,59 @@ describe('server health', () => {
     expect(authenticated.json()).toEqual({ player: { id: 'player-1' } })
     await sessionApp.close()
   })
+
+  it('routes community admin game changes through the authenticated session', async () => {
+    const calls: unknown[] = []
+    const app = buildServer({
+      appSessionService: {
+        getSession: (token: string | undefined) =>
+          Promise.resolve(
+            token === 'admin-session'
+              ? {
+                  sessionId: 'session-admin',
+                  playerId: 'player-admin',
+                  telegramIdentityId: 'identity-admin',
+                  telegramUserId: 7001n,
+                  targetCommunityId: 'community-one',
+                  targetMode: 'admin' as const,
+                  expiresAt: new Date('2026-10-15T10:00:00.000Z'),
+                }
+              : null,
+          ),
+        revokeSession: () => Promise.resolve(),
+        exchangeCode: () => Promise.reject(new Error('not used')),
+      } as never,
+      appApiService: {
+        adminSetGameCapability: (_actor: unknown, communityId: string, input: unknown) => {
+          calls.push({ communityId, input })
+          return Promise.resolve({ gameKey: 'word_seek', enabled: true })
+        },
+      } as never,
+    })
+
+    const anonymous = await app.inject({
+      method: 'PATCH',
+      url: '/api/app/admin/communities/community-one/games/word_seek',
+      payload: { enabled: true, config: { source: 'PROJECT' } },
+    })
+    const authenticated = await app.inject({
+      method: 'PATCH',
+      url: '/api/app/admin/communities/community-one/games/word_seek',
+      headers: { cookie: 'rallyo_session=admin-session' },
+      payload: { enabled: true, config: { source: 'PROJECT' } },
+    })
+
+    expect(anonymous.statusCode).toBe(401)
+    expect(authenticated.statusCode).toBe(200)
+    expect(authenticated.json()).toEqual({
+      capability: { gameKey: 'word_seek', enabled: true },
+    })
+    expect(calls).toEqual([
+      {
+        communityId: 'community-one',
+        input: { gameKey: 'word_seek', enabled: true, config: { source: 'PROJECT' } },
+      },
+    ])
+    await app.close()
+  })
 })

@@ -1,11 +1,20 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 
-import { api, ApiError, type AppGameCapability, type AppTask } from '../api/client'
+import {
+  api,
+  ApiError,
+  type AppAdminPendingSubmission,
+  type AppAdminQuestion,
+  type AppAdminTask,
+  type AppAdminWord,
+  type AppGameCapability,
+} from '../api/client'
 import {
   Button,
   EmptyState,
   ErrorState,
+  Field,
   Icon,
   LeaderboardRow,
   LoadingState,
@@ -168,6 +177,10 @@ function AdminOverviewForCommunity({ communityId }: { readonly communityId: stri
             <AdminStat label="Active tasks" value={overview.activeTaskCount} />
             <AdminStat label="Pending task reviews" value={overview.pendingReviewCount} />
             <AdminStat label="Approved questions ready" value={overview.readyQuestionCount} />
+            <AdminStat label="Messages recorded" value={overview.activity.messageCount} />
+            <AdminStat label="Active chatters" value={overview.activity.activePlayers} />
+            <AdminStat label="Reward entitlements" value={overview.rewards.entitlementCount} />
+            <AdminStat label="Reward pool (Luna)" value={overview.rewards.totalAmountLuna} />
           </div>
         </section>
       </div>
@@ -273,7 +286,7 @@ export function AdminGamesPage({ communityId }: { readonly communityId: string }
       }
     >
       <StatusBanner
-        detail="This page reflects the server capability state. Web enablement controls are intentionally unavailable until a community-scoped mutation route is exposed."
+        detail="Enablement is saved by the community-scoped server route. Gameplay still starts and runs in Telegram."
         icon="telegram"
         title="Play stays in Telegram"
         tone="info"
@@ -288,6 +301,8 @@ export function AdminGamesPage({ communityId }: { readonly communityId: string }
             <AdminGameRow
               game={game}
               key={game.gameKey}
+              communityId={communityId}
+              onChanged={resource.retry}
               readyQuestionCount={overview.readyQuestionCount}
             />
           ))
@@ -405,7 +420,7 @@ export function AdminSeasonPage({ communityId }: { readonly communityId: string 
 
 export function AdminTasksPage({ communityId }: { readonly communityId: string }) {
   const overview = useAdminOverview(communityId)
-  const tasksLoad = useCallback(() => api.tasks(communityId), [communityId])
+  const tasksLoad = useCallback(() => api.adminTasks(communityId), [communityId])
   const tasks = useResource(tasksLoad)
 
   if (overview.status === 'loading') return <AdminLoading label="Loading task control" />
@@ -417,7 +432,7 @@ export function AdminTasksPage({ communityId }: { readonly communityId: string }
     <PageFrame
       eyebrow="COMMUNITY CONTROL / SOCIAL TASKS"
       title="Social tasks"
-      detail="Review the active task state returned for this community. Task creation and review actions remain server-authorized."
+      detail="Create campaigns and review player submissions for this community. Points are awarded only by the server after approval."
       action={
         <Link className="button button-outline" to={adminPath(communityId)}>
           Overview <Icon name="arrow-right" size={17} />
@@ -426,11 +441,6 @@ export function AdminTasksPage({ communityId }: { readonly communityId: string }
     >
       {data.pendingReviewCount > 0 ? (
         <StatusBanner
-          action={
-            <AdminUnavailableAction explanation="The task-review route is not exposed to the web app yet.">
-              Review submissions
-            </AdminUnavailableAction>
-          }
           detail={`${data.pendingReviewCount.toLocaleString()} pending submission${data.pendingReviewCount === 1 ? '' : 's'} are recorded for this community.`}
           icon="warning"
           title="Review queue needs attention"
@@ -448,16 +458,40 @@ export function AdminTasksPage({ communityId }: { readonly communityId: string }
       <section className="admin-action-panel admin-task-actions">
         <div>
           <SectionLabel>TASK LIFECYCLE</SectionLabel>
-          <h2>Campaign setup is waiting on the web seam</h2>
+          <h2>Create a campaign</h2>
           <p>
-            The Telegram service supports reviewable social tasks. The app API does not yet expose
-            create, archive, approve, or reject routes for this community.
+            New tasks are created through the same Social Task service used by Telegram. Expired
+            active tasks can be archived from this community scope.
           </p>
         </div>
-        <AdminUnavailableAction explanation="No web task-creation route exists, so no form is shown.">
-          Create a task
-        </AdminUnavailableAction>
+        <div className="admin-action-stack">
+          <AdminCreateTaskForm
+            communityId={communityId}
+            onChanged={() => {
+              tasks.retry()
+              overview.retry()
+            }}
+          />
+          <AdminArchiveExpiredTasks
+            communityId={communityId}
+            onChanged={() => {
+              tasks.retry()
+              overview.retry()
+            }}
+          />
+        </div>
       </section>
+
+      {tasks.status === 'ready' ? (
+        <AdminReviewQueue
+          communityId={communityId}
+          submissions={tasks.data.pendingSubmissions}
+          onChanged={() => {
+            tasks.retry()
+            overview.retry()
+          }}
+        />
+      ) : null}
 
       <section className="admin-section-block">
         <div className="admin-section-heading">
@@ -493,9 +527,9 @@ export function AdminTasksPage({ communityId }: { readonly communityId: string }
       </section>
 
       <StatusBanner
-        detail="Recurring versus campaign labels, proof-type metadata, caps, and historical task rows are not part of the current web response."
+        detail="Only currently active tasks and pending submissions are returned by this community read model."
         icon="lock"
-        title="Limited task read model"
+        title="Scoped active-task view"
         tone="info"
       />
     </PageFrame>
@@ -504,10 +538,18 @@ export function AdminTasksPage({ communityId }: { readonly communityId: string }
 
 export function AdminContentPage({ communityId }: { readonly communityId: string }) {
   const resource = useAdminOverview(communityId)
+  const contentLoad = useCallback(() => api.adminContent(communityId), [communityId])
+  const content = useResource(contentLoad)
+  const [questionFormOpen, setQuestionFormOpen] = useState(false)
+  const [wordFormOpen, setWordFormOpen] = useState(false)
   if (resource.status === 'loading') return <AdminLoading label="Loading project content state" />
   if (resource.status === 'error')
     return <AdminResourceError error={resource.error} retry={resource.retry} />
   const overview = resource.data
+  const refreshContent = () => {
+    content.retry()
+    resource.retry()
+  }
 
   return (
     <PageFrame
@@ -535,10 +577,20 @@ export function AdminContentPage({ communityId }: { readonly communityId: string
           tone={overview.readyQuestionCount > 0 ? 'success' : 'warning'}
         />
         <ContentReadinessCard
-          detail="Approved project vocabulary is not returned by the current app API."
+          detail={
+            content.status === 'ready'
+              ? 'Approved project vocabulary returned for this community.'
+              : 'Loading approved project vocabulary for this community.'
+          }
           label="Vocabulary"
-          value="Not exposed"
-          tone="neutral"
+          value={
+            content.status === 'ready'
+              ? content.data.words
+                  .filter((word) => word.status === 'APPROVED')
+                  .length.toLocaleString()
+              : '...'
+          }
+          tone={content.status === 'ready' ? 'success' : 'neutral'}
         />
         <ContentReadinessCard
           detail="Prepared image and media readiness is not returned by the current app API."
@@ -551,20 +603,105 @@ export function AdminContentPage({ communityId }: { readonly communityId: string
       <section className="admin-action-panel">
         <div>
           <SectionLabel>PROJECT BRAIN</SectionLabel>
-          <h2>Content actions are not connected</h2>
+          <h2>Build the approved content queue</h2>
           <p>
-            The existing Telegram flow can guide authorized content work. The web app has no
-            community-scoped draft, approval, or source endpoint yet.
+            Drafts are created through Question Bank and Word Seek services. Approval is a separate
+            server action, so live Telegram games only see approved records.
           </p>
         </div>
         <div className="admin-action-stack">
-          <AdminUnavailableAction explanation="No web route exists for creating a question draft.">
-            Add a question
-          </AdminUnavailableAction>
-          <AdminUnavailableAction explanation="No web route exists for adding or approving project vocabulary.">
-            Add project words
-          </AdminUnavailableAction>
+          <Button
+            onClick={() => setQuestionFormOpen((value) => !value)}
+            type="button"
+            variant="secondary"
+          >
+            {questionFormOpen ? 'Close question form' : 'Add a question draft'}
+          </Button>
+          <Button
+            onClick={() => setWordFormOpen((value) => !value)}
+            type="button"
+            variant="secondary"
+          >
+            {wordFormOpen ? 'Close word form' : 'Add project word draft'}
+          </Button>
         </div>
+      </section>
+
+      {questionFormOpen ? (
+        <AdminQuestionDraftForm communityId={communityId} onCreated={refreshContent} />
+      ) : null}
+      {wordFormOpen ? (
+        <AdminWordDraftForm communityId={communityId} onCreated={refreshContent} />
+      ) : null}
+
+      <section className="admin-section-block">
+        <div className="admin-section-heading">
+          <div>
+            <SectionLabel>QUESTION BANK</SectionLabel>
+            <h2>Community questions</h2>
+          </div>
+          <span className="admin-section-count">
+            {content.status === 'ready' ? content.data.questions.length.toLocaleString() : '...'}{' '}
+            records
+          </span>
+        </div>
+        {content.status === 'loading' ? <LoadingState label="Loading project content" /> : null}
+        {content.status === 'error' ? (
+          <ErrorState
+            detail={content.error.message}
+            onRetry={content.retry}
+            title="Project content could not be loaded."
+          />
+        ) : null}
+        {content.status === 'ready' && content.data.questions.length === 0 ? (
+          <EmptyState
+            detail="No community question drafts or approvals have been returned."
+            title="No community questions"
+          />
+        ) : null}
+        {content.status === 'ready' && content.data.questions.length > 0 ? (
+          <div className="admin-content-list">
+            {content.data.questions.map((question) => (
+              <AdminQuestionRow
+                key={question.id}
+                communityId={communityId}
+                question={question}
+                onChanged={refreshContent}
+              />
+            ))}
+          </div>
+        ) : null}
+      </section>
+
+      <section className="admin-section-block">
+        <div className="admin-section-heading">
+          <div>
+            <SectionLabel>WORD SEEK</SectionLabel>
+            <h2>Project vocabulary</h2>
+          </div>
+          <span className="admin-section-count">
+            {content.status === 'ready' ? content.data.words.length.toLocaleString() : '...'}{' '}
+            records
+          </span>
+        </div>
+        {content.status === 'ready' && content.data.words.length === 0 ? (
+          <EmptyState
+            detail="No project word drafts or approvals have been returned."
+            title="No project words"
+          />
+        ) : null}
+        {content.status === 'ready' && content.data.words.length > 0 ? (
+          <div className="admin-content-list">
+            {content.data.words.map((word) => (
+              <AdminWordRow
+                key={word.id}
+                communityId={communityId}
+                word={word}
+                onChanged={refreshContent}
+              />
+            ))}
+          </div>
+        ) : null}
       </section>
 
       <section className="panel">
@@ -585,8 +722,12 @@ export function AdminContentPage({ communityId }: { readonly communityId: string
             </strong>
           </div>
           <div>
-            <span>Word Seek and Scramble sources</span>
-            <strong>Readiness not exposed in this response</strong>
+            <span>Word Seek project sources</span>
+            <strong>
+              {content.status === 'ready'
+                ? `${content.data.words.filter((word) => word.status === 'APPROVED').length.toLocaleString()} approved project words`
+                : 'Project source read is loading'}
+            </strong>
           </div>
         </div>
       </section>
@@ -652,7 +793,7 @@ function AdminScopeBar({
   )
 }
 
-function AdminStat({ label, value }: { readonly label: string; readonly value: number }) {
+function AdminStat({ label, value }: { readonly label: string; readonly value: number | string }) {
   return (
     <div className="admin-stat">
       <span>{label}</span>
@@ -677,12 +818,19 @@ function AdminCapability({ game }: { readonly game: AppGameCapability }) {
 }
 
 function AdminGameRow({
+  communityId,
   game,
+  onChanged,
   readyQuestionCount,
 }: {
+  readonly communityId: string
   readonly game: AppGameCapability
+  readonly onChanged: () => void
   readonly readyQuestionCount: number
 }) {
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
   const details: Record<string, { readonly icon: IconName; readonly detail: string }> = {
     project_quiz: {
       icon: 'list',
@@ -705,6 +853,21 @@ function AdminGameRow({
     detail: 'Game state returned by the server.',
   }
 
+  const changeCapability = async () => {
+    setPending(true)
+    setError(null)
+    setSaved(false)
+    try {
+      await api.updateAdminGame(communityId, game.gameKey, { enabled: !game.enabled })
+      setSaved(true)
+      onChanged()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Capability could not be saved.')
+    } finally {
+      setPending(false)
+    }
+  }
+
   return (
     <article
       className={`admin-game-row admin-game-row-${game.gameKey} ${game.enabled ? 'is-enabled' : 'is-disabled'}`}
@@ -725,16 +888,29 @@ function AdminGameRow({
         <p>{detail.detail}</p>
         <div className="admin-game-footer">
           <span>Play surface: Telegram</span>
-          <AdminUnavailableAction explanation="The app API exposes no game capability mutation route yet.">
-            Change in web
-          </AdminUnavailableAction>
+          <div className="admin-unavailable-action">
+            <Button
+              loading={pending}
+              onClick={() => void changeCapability()}
+              type="button"
+              variant="secondary"
+            >
+              {game.enabled ? 'Disable capability' : 'Enable capability'}
+            </Button>
+            <p>
+              {error ??
+                (saved
+                  ? 'Saved to this community. Telegram will use the updated capability state.'
+                  : 'Only capability state changes here. The game itself stays in Telegram.')}
+            </p>
+          </div>
         </div>
       </div>
     </article>
   )
 }
 
-function AdminTaskRow({ task }: { readonly task: AppTask }) {
+function AdminTaskRow({ task }: { readonly task: AppAdminTask }) {
   return (
     <article className="admin-task-row">
       <div>
@@ -750,6 +926,509 @@ function AdminTaskRow({ task }: { readonly task: AppTask }) {
       </div>
     </article>
   )
+}
+
+function AdminCreateTaskForm({
+  communityId,
+  onChanged,
+}: {
+  readonly communityId: string
+  readonly onChanged: () => void
+}) {
+  const [title, setTitle] = useState('')
+  const [instructions, setInstructions] = useState('')
+  const [points, setPoints] = useState('10')
+  const [startsAt, setStartsAt] = useState(() => localDateTimeValue(new Date()))
+  const [endsAt, setEndsAt] = useState(() =>
+    localDateTimeValue(new Date(Date.now() + 7 * 86_400_000)),
+  )
+  const [pending, setPending] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setPending(true)
+    setMessage(null)
+    setError(null)
+    try {
+      await api.createAdminTask(communityId, {
+        title,
+        instructions,
+        points: Number(points),
+        startsAt: new Date(startsAt).toISOString(),
+        endsAt: new Date(endsAt).toISOString(),
+      })
+      setTitle('')
+      setInstructions('')
+      setMessage('Task created. It is now available through the server task feed.')
+      onChanged()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Task could not be created.')
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <form className="admin-inline-form" onSubmit={(event) => void submit(event)}>
+      <Field
+        label="Task title"
+        onChange={(event) => setTitle(event.target.value)}
+        required
+        value={title}
+      />
+      <label className="admin-form-field">
+        Instructions
+        <textarea
+          onChange={(event) => setInstructions(event.target.value)}
+          required
+          value={instructions}
+        />
+      </label>
+      <div className="admin-form-grid">
+        <Field
+          label="Points"
+          min="1"
+          onChange={(event) => setPoints(event.target.value)}
+          required
+          type="number"
+          value={points}
+        />
+        <Field
+          label="Starts"
+          onChange={(event) => setStartsAt(event.target.value)}
+          required
+          type="datetime-local"
+          value={startsAt}
+        />
+        <Field
+          label="Ends"
+          onChange={(event) => setEndsAt(event.target.value)}
+          required
+          type="datetime-local"
+          value={endsAt}
+        />
+      </div>
+      {error ? <p className="field-message field-message-error">{error}</p> : null}
+      {message ? <p className="field-message">{message}</p> : null}
+      <Button loading={pending} type="submit" variant="primary">
+        Create task
+      </Button>
+    </form>
+  )
+}
+
+function AdminArchiveExpiredTasks({
+  communityId,
+  onChanged,
+}: {
+  readonly communityId: string
+  readonly onChanged: () => void
+}) {
+  const [pending, setPending] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const archive = async () => {
+    setPending(true)
+    setMessage(null)
+    try {
+      const result = await api.archiveExpiredAdminTasks(communityId)
+      setMessage(
+        result.archivedCount === 0
+          ? 'No expired active tasks were found.'
+          : `${result.archivedCount} expired task${result.archivedCount === 1 ? '' : 's'} archived.`,
+      )
+      onChanged()
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : 'Expired tasks could not be archived.')
+    } finally {
+      setPending(false)
+    }
+  }
+  return (
+    <div className="admin-unavailable-action">
+      <Button loading={pending} onClick={() => void archive()} type="button" variant="secondary">
+        Archive expired tasks
+      </Button>
+      {message ? <p>{message}</p> : null}
+    </div>
+  )
+}
+
+function AdminReviewQueue({
+  communityId,
+  submissions,
+  onChanged,
+}: {
+  readonly communityId: string
+  readonly submissions: readonly AppAdminPendingSubmission[]
+  readonly onChanged: () => void
+}) {
+  return (
+    <section className="admin-section-block">
+      <div className="admin-section-heading">
+        <div>
+          <SectionLabel>REVIEW QUEUE</SectionLabel>
+          <h2>Pending submissions</h2>
+        </div>
+        <span className="admin-section-count">{submissions.length.toLocaleString()} pending</span>
+      </div>
+      {submissions.length === 0 ? (
+        <EmptyState
+          detail="Approved and rejected submissions leave this queue."
+          title="Queue is clear"
+        />
+      ) : (
+        <div className="admin-content-list">
+          {submissions.map((submission) => (
+            <AdminReviewRow
+              key={submission.id}
+              communityId={communityId}
+              submission={submission}
+              onChanged={onChanged}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function AdminReviewRow({
+  communityId,
+  submission,
+  onChanged,
+}: {
+  readonly communityId: string
+  readonly submission: AppAdminPendingSubmission
+  readonly onChanged: () => void
+}) {
+  const [pending, setPending] = useState<'approve' | 'reject' | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [reason, setReason] = useState('')
+  const review = async (action: 'approve' | 'reject') => {
+    setPending(action)
+    setError(null)
+    try {
+      if (action === 'approve') await api.approveAdminSubmission(communityId, submission.id)
+      else await api.rejectAdminSubmission(communityId, submission.id, reason)
+      onChanged()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Submission could not be reviewed.')
+    } finally {
+      setPending(null)
+    }
+  }
+  return (
+    <article className="admin-content-row">
+      <div className="admin-content-row-copy">
+        <div className="admin-task-row-heading">
+          <h3>{submission.taskTitle}</h3>
+          <ToneBadge tone="warning">Pending</ToneBadge>
+        </div>
+        <p>
+          {submission.player.displayName} · submitted {formatDateTime(submission.createdAt)}
+        </p>
+        <code className="admin-reference">{submission.reference}</code>
+        <input
+          aria-label={`Rejection reason for ${submission.taskTitle}`}
+          className="admin-compact-input"
+          onChange={(event) => setReason(event.target.value)}
+          placeholder="Optional rejection reason"
+          value={reason}
+        />
+      </div>
+      <div className="admin-row-actions">
+        <Button
+          loading={pending === 'approve'}
+          onClick={() => void review('approve')}
+          type="button"
+        >
+          Approve
+        </Button>
+        <Button
+          loading={pending === 'reject'}
+          onClick={() => void review('reject')}
+          type="button"
+          variant="danger"
+        >
+          Reject
+        </Button>
+        {error ? <p className="field-message field-message-error">{error}</p> : null}
+      </div>
+    </article>
+  )
+}
+
+function AdminQuestionDraftForm({
+  communityId,
+  onCreated,
+}: {
+  readonly communityId: string
+  readonly onCreated: () => void
+}) {
+  const [values, setValues] = useState({
+    sourceTitle: '',
+    sourceText: '',
+    prompt: '',
+    correctAnswer: '',
+    category: '',
+    difficulty: 'medium' as 'easy' | 'medium' | 'hard',
+  })
+  const [pending, setPending] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setPending(true)
+    setMessage(null)
+    setError(null)
+    try {
+      await api.createAdminQuestionDraft(communityId, values)
+      setMessage('Question saved as a draft. Approve it below when it is ready.')
+      onCreated()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Question draft could not be created.')
+    } finally {
+      setPending(false)
+    }
+  }
+  return (
+    <form className="admin-inline-panel admin-inline-form" onSubmit={(event) => void submit(event)}>
+      <div className="admin-section-heading">
+        <div>
+          <SectionLabel>QUESTION DRAFT</SectionLabel>
+          <h2>One server-validated question</h2>
+        </div>
+      </div>
+      <div className="admin-form-grid">
+        <Field
+          label="Source title"
+          onChange={(event) => setValues({ ...values, sourceTitle: event.target.value })}
+          required
+          value={values.sourceTitle}
+        />
+        <Field
+          label="Category"
+          onChange={(event) => setValues({ ...values, category: event.target.value })}
+          required
+          value={values.category}
+        />
+        <label className="admin-form-field">
+          Difficulty
+          <select
+            className="admin-select"
+            onChange={(event) =>
+              setValues({ ...values, difficulty: event.target.value as typeof values.difficulty })
+            }
+            value={values.difficulty}
+          >
+            <option value="easy">Easy</option>
+            <option value="medium">Medium</option>
+            <option value="hard">Hard</option>
+          </select>
+        </label>
+      </div>
+      <label className="admin-form-field">
+        Source text
+        <textarea
+          minLength={20}
+          onChange={(event) => setValues({ ...values, sourceText: event.target.value })}
+          required
+          value={values.sourceText}
+        />
+      </label>
+      <label className="admin-form-field">
+        Prompt
+        <textarea
+          minLength={12}
+          onChange={(event) => setValues({ ...values, prompt: event.target.value })}
+          required
+          value={values.prompt}
+        />
+      </label>
+      <Field
+        label="Correct answer"
+        onChange={(event) => setValues({ ...values, correctAnswer: event.target.value })}
+        required
+        value={values.correctAnswer}
+      />
+      {error ? <p className="field-message field-message-error">{error}</p> : null}
+      {message ? <p className="field-message">{message}</p> : null}
+      <Button loading={pending} type="submit">
+        Save question draft
+      </Button>
+    </form>
+  )
+}
+
+function AdminWordDraftForm({
+  communityId,
+  onCreated,
+}: {
+  readonly communityId: string
+  readonly onCreated: () => void
+}) {
+  const [word, setWord] = useState('')
+  const [clue, setClue] = useState('')
+  const [sourceRef, setSourceRef] = useState('')
+  const [pending, setPending] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setPending(true)
+    setMessage(null)
+    setError(null)
+    try {
+      await api.createAdminWordDraft(communityId, {
+        word,
+        ...(clue ? { clue } : {}),
+        ...(sourceRef ? { sourceRef } : {}),
+      })
+      setMessage('Word saved as a draft. Approve it below before Word Seek can use it.')
+      onCreated()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Word draft could not be created.')
+    } finally {
+      setPending(false)
+    }
+  }
+  return (
+    <form className="admin-inline-panel admin-inline-form" onSubmit={(event) => void submit(event)}>
+      <div className="admin-section-heading">
+        <div>
+          <SectionLabel>WORD DRAFT</SectionLabel>
+          <h2>Project vocabulary</h2>
+        </div>
+      </div>
+      <div className="admin-form-grid">
+        <Field
+          label="Word"
+          maxLength={6}
+          minLength={4}
+          onChange={(event) => setWord(event.target.value)}
+          required
+          value={word}
+        />
+        <Field
+          label="Source reference"
+          onChange={(event) => setSourceRef(event.target.value)}
+          value={sourceRef}
+        />
+      </div>
+      <label className="admin-form-field">
+        Clue (optional)
+        <textarea maxLength={500} onChange={(event) => setClue(event.target.value)} value={clue} />
+      </label>
+      {error ? <p className="field-message field-message-error">{error}</p> : null}
+      {message ? <p className="field-message">{message}</p> : null}
+      <Button loading={pending} type="submit">
+        Save word draft
+      </Button>
+    </form>
+  )
+}
+
+function AdminQuestionRow({
+  communityId,
+  question,
+  onChanged,
+}: {
+  readonly communityId: string
+  readonly question: AppAdminQuestion
+  readonly onChanged: () => void
+}) {
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const approve = async () => {
+    setPending(true)
+    setError(null)
+    try {
+      await api.approveAdminQuestion(communityId, question.id)
+      onChanged()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Question could not be approved.')
+    } finally {
+      setPending(false)
+    }
+  }
+  return (
+    <article className="admin-content-row">
+      <div className="admin-content-row-copy">
+        <div className="admin-task-row-heading">
+          <h3>{question.prompt}</h3>
+          <ToneBadge tone={question.status === 'APPROVED' ? 'success' : 'warning'}>
+            {question.status}
+          </ToneBadge>
+        </div>
+        <p>
+          {question.category} · {question.difficulty} · +{question.basePoints} points
+        </p>
+      </div>
+      {question.status === 'DRAFT' ? (
+        <div className="admin-row-actions">
+          <Button loading={pending} onClick={() => void approve()} type="button">
+            Approve
+          </Button>
+          {error ? <p className="field-message field-message-error">{error}</p> : null}
+        </div>
+      ) : null}
+    </article>
+  )
+}
+
+function AdminWordRow({
+  communityId,
+  word,
+  onChanged,
+}: {
+  readonly communityId: string
+  readonly word: AppAdminWord
+  readonly onChanged: () => void
+}) {
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const approve = async () => {
+    setPending(true)
+    setError(null)
+    try {
+      await api.approveAdminWord(communityId, word.id)
+      onChanged()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Word could not be approved.')
+    } finally {
+      setPending(false)
+    }
+  }
+  return (
+    <article className="admin-content-row">
+      <div className="admin-content-row-copy">
+        <div className="admin-task-row-heading">
+          <h3>{word.word}</h3>
+          <ToneBadge tone={word.status === 'APPROVED' ? 'success' : 'warning'}>
+            {word.status}
+          </ToneBadge>
+        </div>
+        <p>
+          {word.wordLength} letters{word.clue ? ` · ${word.clue}` : ''}
+        </p>
+      </div>
+      {word.status === 'DRAFT' ? (
+        <div className="admin-row-actions">
+          <Button loading={pending} onClick={() => void approve()} type="button">
+            Approve
+          </Button>
+          {error ? <p className="field-message field-message-error">{error}</p> : null}
+        </div>
+      ) : null}
+    </article>
+  )
+}
+
+function localDateTimeValue(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 function ContentReadinessCard({

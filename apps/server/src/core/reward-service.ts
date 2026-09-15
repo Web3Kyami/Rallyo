@@ -32,6 +32,30 @@ export class RewardService {
     },
   ) {}
 
+  async summaryForCommunity(communityId: string) {
+    const [row] = await this.database
+      .select({
+        entitlementCount: sql<string>`count(*)`,
+        totalAmountLuna: sql<string>`coalesce(sum(${schema.rewardEntitlements.amountLuna}), 0)`,
+        eligibleCount: sql<string>`count(*) filter (where ${schema.rewardEntitlements.status} = 'ELIGIBLE')`,
+        sentCount: sql<string>`count(*) filter (where ${schema.rewardEntitlements.status} = 'SENT')`,
+        confirmedCount: sql<string>`count(*) filter (where ${schema.rewardEntitlements.status} = 'CONFIRMED')`,
+        failedCount: sql<string>`count(*) filter (where ${schema.rewardEntitlements.status} = 'FAILED')`,
+      })
+      .from(schema.rewardEntitlements)
+      .innerJoin(schema.seasons, eq(schema.rewardEntitlements.seasonId, schema.seasons.id))
+      .where(eq(schema.seasons.communityId, communityId))
+
+    return {
+      entitlementCount: Number(row?.entitlementCount ?? 0),
+      totalAmountLuna: String(row?.totalAmountLuna ?? '0'),
+      eligibleCount: Number(row?.eligibleCount ?? 0),
+      sentCount: Number(row?.sentCount ?? 0),
+      confirmedCount: Number(row?.confirmedCount ?? 0),
+      failedCount: Number(row?.failedCount ?? 0),
+    }
+  }
+
   async finalizeSeason(input: {
     readonly seasonId: string
     readonly payouts: readonly { readonly rank: number; readonly amountLuna: bigint }[]

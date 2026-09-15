@@ -2,7 +2,12 @@ import Fastify from 'fastify'
 import { timingSafeEqual } from 'node:crypto'
 
 import type { RallyoDatabase } from './db/client'
-import { AppApiForbiddenError, AppApiNotFoundError, AppApiService } from './core/app-api-service'
+import {
+  AppApiForbiddenError,
+  AppApiNotFoundError,
+  AppApiService,
+  AppApiValidationError,
+} from './core/app-api-service'
 import { AppWalletAuthError, AppWalletAuthService } from './core/app-wallet-auth-service'
 import { AppSessionError, AppSessionService } from './core/app-session-service'
 import type { WalletLinkService } from './core/wallet-link-service'
@@ -330,6 +335,263 @@ export function buildServer(options: ServerOptions = {}) {
         }
       },
     )
+
+    app.patch<{
+      Params: { communityId: string; gameKey: string }
+      Body: { gameKey?: unknown; enabled?: unknown; config?: unknown }
+    }>('/api/app/admin/communities/:communityId/games/:gameKey', async (request, reply) => {
+      const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+      if (!actor) return
+      try {
+        if (typeof request.params.gameKey !== 'string') {
+          return sendApiError(reply, 400, 'INVALID_REQUEST', 'A game key is required.')
+        }
+        return {
+          capability: await appApiService.adminSetGameCapability(
+            actor,
+            request.params.communityId,
+            {
+              gameKey: request.params.gameKey,
+              enabled: request.body?.enabled as boolean,
+              ...(request.body?.config === undefined ? {} : { config: request.body.config }),
+            },
+          ),
+        }
+      } catch (error) {
+        return sendAppApiError(reply, error)
+      }
+    })
+
+    app.get<{ Params: { communityId: string } }>(
+      '/api/app/admin/communities/:communityId/tasks',
+      async (request, reply) => {
+        const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+        if (!actor) return
+        try {
+          return await appApiService.adminTasks(actor, request.params.communityId)
+        } catch (error) {
+          return sendAppApiError(reply, error)
+        }
+      },
+    )
+
+    app.post<{
+      Params: { communityId: string }
+      Body: {
+        title?: unknown
+        instructions?: unknown
+        points?: unknown
+        startsAt?: unknown
+        endsAt?: unknown
+        maxSubmissionsPerPlayer?: unknown
+        cooldownDays?: unknown
+      }
+    }>('/api/app/admin/communities/:communityId/tasks', async (request, reply) => {
+      const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+      if (!actor) return
+      try {
+        const body = request.body ?? {}
+        return {
+          task: await appApiService.adminCreateTask(actor, request.params.communityId, {
+            title: readAdminString(body.title, 'Task title'),
+            instructions: readAdminString(body.instructions, 'Task instructions'),
+            points: readAdminSafeInteger(body.points, 'Task points'),
+            startsAt: readAdminDate(body.startsAt, 'Task start'),
+            endsAt: readAdminDate(body.endsAt, 'Task end'),
+            ...(body.maxSubmissionsPerPlayer === undefined
+              ? {}
+              : {
+                  maxSubmissionsPerPlayer: readAdminSafeInteger(
+                    body.maxSubmissionsPerPlayer,
+                    'Submission cap',
+                  ),
+                }),
+            ...(body.cooldownDays === undefined
+              ? {}
+              : { cooldownDays: readAdminSafeInteger(body.cooldownDays, 'Cooldown days') }),
+          }),
+        }
+      } catch (error) {
+        return sendAppApiError(reply, error)
+      }
+    })
+
+    app.post<{ Params: { communityId: string } }>(
+      '/api/app/admin/communities/:communityId/tasks/archive-expired',
+      async (request, reply) => {
+        const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+        if (!actor) return
+        try {
+          return await appApiService.adminArchiveExpiredTasks(actor, request.params.communityId)
+        } catch (error) {
+          return sendAppApiError(reply, error)
+        }
+      },
+    )
+
+    app.post<{ Params: { communityId: string; submissionId: string } }>(
+      '/api/app/admin/communities/:communityId/tasks/submissions/:submissionId/approve',
+      async (request, reply) => {
+        const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+        if (!actor) return
+        try {
+          return {
+            result: await appApiService.adminApproveSubmission(
+              actor,
+              request.params.communityId,
+              request.params.submissionId,
+            ),
+          }
+        } catch (error) {
+          return sendAppApiError(reply, error)
+        }
+      },
+    )
+
+    app.post<{
+      Params: { communityId: string; submissionId: string }
+      Body: { reason?: unknown }
+    }>(
+      '/api/app/admin/communities/:communityId/tasks/submissions/:submissionId/reject',
+      async (request, reply) => {
+        const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+        if (!actor) return
+        try {
+          const reason = request.body?.reason
+          if (reason !== undefined && typeof reason !== 'string') {
+            return sendApiError(reply, 400, 'INVALID_REQUEST', 'Rejection reason must be text.')
+          }
+          return {
+            result: await appApiService.adminRejectSubmission(
+              actor,
+              request.params.communityId,
+              request.params.submissionId,
+              reason,
+            ),
+          }
+        } catch (error) {
+          return sendAppApiError(reply, error)
+        }
+      },
+    )
+
+    app.get<{ Params: { communityId: string } }>(
+      '/api/app/admin/communities/:communityId/content',
+      async (request, reply) => {
+        const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+        if (!actor) return
+        try {
+          return await appApiService.adminContent(actor, request.params.communityId)
+        } catch (error) {
+          return sendAppApiError(reply, error)
+        }
+      },
+    )
+
+    app.post<{
+      Params: { communityId: string }
+      Body: {
+        sourceTitle?: unknown
+        sourceText?: unknown
+        prompt?: unknown
+        correctAnswer?: unknown
+        category?: unknown
+        difficulty?: unknown
+      }
+    }>(
+      '/api/app/admin/communities/:communityId/content/questions/drafts',
+      async (request, reply) => {
+        const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+        if (!actor) return
+        try {
+          const body = request.body ?? {}
+          const difficulty = body.difficulty
+          if (difficulty !== 'easy' && difficulty !== 'medium' && difficulty !== 'hard') {
+            return sendApiError(reply, 400, 'INVALID_REQUEST', 'Question difficulty is invalid.')
+          }
+          return {
+            question: await appApiService.adminCreateQuestionDraft(
+              actor,
+              request.params.communityId,
+              {
+                sourceTitle: readAdminString(body.sourceTitle, 'Source title'),
+                sourceText: readAdminString(body.sourceText, 'Source text'),
+                prompt: readAdminString(body.prompt, 'Question prompt'),
+                correctAnswer: readAdminString(body.correctAnswer, 'Correct answer'),
+                category: readAdminString(body.category, 'Question category'),
+                difficulty,
+              },
+            ),
+          }
+        } catch (error) {
+          return sendAppApiError(reply, error)
+        }
+      },
+    )
+
+    app.post<{ Params: { communityId: string; questionId: string } }>(
+      '/api/app/admin/communities/:communityId/content/questions/:questionId/approve',
+      async (request, reply) => {
+        const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+        if (!actor) return
+        try {
+          return {
+            question: await appApiService.adminApproveQuestion(
+              actor,
+              request.params.communityId,
+              request.params.questionId,
+            ),
+          }
+        } catch (error) {
+          return sendAppApiError(reply, error)
+        }
+      },
+    )
+
+    app.post<{
+      Params: { communityId: string }
+      Body: { word?: unknown; clue?: unknown; sourceRef?: unknown }
+    }>('/api/app/admin/communities/:communityId/content/words/drafts', async (request, reply) => {
+      const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+      if (!actor) return
+      try {
+        const body = request.body ?? {}
+        if (body.clue !== undefined && typeof body.clue !== 'string') {
+          return sendApiError(reply, 400, 'INVALID_REQUEST', 'Word clue must be text.')
+        }
+        if (body.sourceRef !== undefined && typeof body.sourceRef !== 'string') {
+          return sendApiError(reply, 400, 'INVALID_REQUEST', 'Word source reference must be text.')
+        }
+        return {
+          word: await appApiService.adminCreateWordDraft(actor, request.params.communityId, {
+            word: readAdminString(body.word, 'Project word'),
+            ...(body.clue === undefined ? {} : { clue: body.clue }),
+            ...(body.sourceRef === undefined ? {} : { sourceRef: body.sourceRef }),
+          }),
+        }
+      } catch (error) {
+        return sendAppApiError(reply, error)
+      }
+    })
+
+    app.post<{ Params: { communityId: string; wordId: string } }>(
+      '/api/app/admin/communities/:communityId/content/words/:wordId/approve',
+      async (request, reply) => {
+        const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+        if (!actor) return
+        try {
+          return {
+            word: await appApiService.adminApproveWord(
+              actor,
+              request.params.communityId,
+              request.params.wordId,
+            ),
+          }
+        } catch (error) {
+          return sendAppApiError(reply, error)
+        }
+      },
+    )
   }
 
   return app
@@ -368,7 +630,31 @@ function sendAppApiError(
   if (error instanceof AppApiNotFoundError) {
     return sendApiError(reply, 404, 'NOT_FOUND', error.message)
   }
+  if (error instanceof AppApiValidationError) {
+    return sendApiError(reply, 400, 'INVALID_REQUEST', error.message)
+  }
   return sendApiError(reply, 500, 'APP_API_ERROR', 'Rallyo could not load this state.')
+}
+
+function readAdminString(value: unknown, label: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new AppApiValidationError(`${label} is required.`)
+  }
+  return value
+}
+
+function readAdminSafeInteger(value: unknown, label: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
+    throw new AppApiValidationError(`${label} must be a safe integer.`)
+  }
+  return value
+}
+
+function readAdminDate(value: unknown, label: string): Date {
+  if (typeof value !== 'string') throw new AppApiValidationError(`${label} must be an ISO date.`)
+  const timestamp = Date.parse(value)
+  if (!Number.isFinite(timestamp)) throw new AppApiValidationError(`${label} must be an ISO date.`)
+  return new Date(timestamp)
 }
 
 function sendApiError(

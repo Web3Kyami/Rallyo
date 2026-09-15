@@ -2,11 +2,21 @@ import { and, asc, desc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-o
 
 import type { RallyoDatabase } from '../db/client'
 import * as schema from '../db/schema'
+import { ActivityService } from './activity-service'
+import {
+  CommunityGameConfigError,
+  CommunityGameConfigService,
+  GAME_KEYS,
+  type GameKey,
+} from './community-game-config-service'
+import { assertCommunityAdmin, CommunityAuthorizationError } from './community-authorization'
 import { communityAdminSnapshot, listAdminCommunities } from '../telegram/persistence'
+import { QuestionBankService, QuestionBankValidationError } from './question-bank-service'
+import { RewardService } from './reward-service'
 import { RoundService } from './round-service'
+import { SocialTaskError, SocialTaskService } from './social-task-service'
 import type { AppSessionActor } from './app-session-service'
-
-const GAME_KEYS = ['project_quiz', 'word_seek', 'scramble'] as const
+import { WordSeekError, WordSeekService, parseWordSeekConfig } from '../games/word-seek/service'
 
 export class AppApiNotFoundError extends Error {
   constructor(message = 'The requested Rallyo resource was not found.') {
@@ -22,11 +32,32 @@ export class AppApiForbiddenError extends Error {
   }
 }
 
+export class AppApiValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'AppApiValidationError'
+  }
+}
+
 export class AppApiService {
   private readonly roundService: RoundService
+  private readonly activityService: ActivityService
+  private readonly gameConfigurations: CommunityGameConfigService
+  private readonly questionBank: QuestionBankService
+  private readonly rewardService: RewardService
+  private readonly socialTasks: SocialTaskService
+  private readonly wordSeek: WordSeekService
 
   constructor(private readonly database: RallyoDatabase) {
     this.roundService = new RoundService(database)
+    this.activityService = new ActivityService(database)
+    this.gameConfigurations = new CommunityGameConfigService(database)
+    this.questionBank = new QuestionBankService(database)
+    this.rewardService = new RewardService(database, () =>
+      Promise.reject(new Error('Reward sending is not available from the app API.')),
+    )
+    this.socialTasks = new SocialTaskService(database)
+    this.wordSeek = new WordSeekService(database, this.gameConfigurations)
   }
 
   async bootstrap(actor: AppSessionActor, now = new Date()) {
@@ -313,36 +344,39 @@ export class AppApiService {
     const snapshot = await communityAdminSnapshot(this.database, communityId, now)
     if (!snapshot) throw new AppApiNotFoundError('Community not found.')
 
-    const [participantCount, activeTaskCount, pendingReviewCount] = await Promise.all([
-      this.database
-        .select({ count: sql<string>`count(distinct ${schema.scoreEvents.playerId})` })
-        .from(schema.scoreEvents)
-        .where(eq(schema.scoreEvents.communityId, communityId)),
-      this.database
-        .select({ count: sql<string>`count(*)` })
-        .from(schema.socialTasks)
-        .where(
-          and(
-            eq(schema.socialTasks.communityId, communityId),
-            eq(schema.socialTasks.status, 'ACTIVE'),
-            lte(schema.socialTasks.startsAt, now),
-            gt(schema.socialTasks.endsAt, now),
+    const [participantCount, activeTaskCount, pendingReviewCount, activity, rewards] =
+      await Promise.all([
+        this.database
+          .select({ count: sql<string>`count(distinct ${schema.scoreEvents.playerId})` })
+          .from(schema.scoreEvents)
+          .where(eq(schema.scoreEvents.communityId, communityId)),
+        this.database
+          .select({ count: sql<string>`count(*)` })
+          .from(schema.socialTasks)
+          .where(
+            and(
+              eq(schema.socialTasks.communityId, communityId),
+              eq(schema.socialTasks.status, 'ACTIVE'),
+              lte(schema.socialTasks.startsAt, now),
+              gt(schema.socialTasks.endsAt, now),
+            ),
           ),
-        ),
-      this.database
-        .select({ count: sql<string>`count(*)` })
-        .from(schema.socialTaskSubmissions)
-        .innerJoin(
-          schema.socialTasks,
-          eq(schema.socialTasks.id, schema.socialTaskSubmissions.taskId),
-        )
-        .where(
-          and(
-            eq(schema.socialTasks.communityId, communityId),
-            eq(schema.socialTaskSubmissions.status, 'PENDING'),
+        this.database
+          .select({ count: sql<string>`count(*)` })
+          .from(schema.socialTaskSubmissions)
+          .innerJoin(
+            schema.socialTasks,
+            eq(schema.socialTasks.id, schema.socialTaskSubmissions.taskId),
+          )
+          .where(
+            and(
+              eq(schema.socialTasks.communityId, communityId),
+              eq(schema.socialTaskSubmissions.status, 'PENDING'),
+            ),
           ),
-        ),
-    ])
+        this.activityService.summary({ communityId }),
+        this.rewardService.summaryForCommunity(communityId),
+      ])
     return {
       community: {
         id: snapshot.community.id,
@@ -356,7 +390,274 @@ export class AppApiService {
       participantCount: Number(participantCount[0]?.count ?? 0),
       activeTaskCount: Number(activeTaskCount[0]?.count ?? 0),
       pendingReviewCount: Number(pendingReviewCount[0]?.count ?? 0),
+      activity,
+      rewards,
       games: await this.gameCapabilities(communityId),
+    }
+  }
+
+  async adminSetGameCapability(
+    actor: AppSessionActor,
+    communityId: string,
+    input: { readonly gameKey: string; readonly enabled: boolean; readonly config?: unknown },
+  ) {
+    await this.assertCommunityAdmin(actor, communityId)
+    if (!GAME_KEYS.includes(input.gameKey as GameKey)) {
+      throw new AppApiValidationError('This game key is not supported.')
+    }
+    if (typeof input.enabled !== 'boolean') {
+      throw new AppApiValidationError('Game enabled must be a boolean.')
+    }
+    if (
+      input.config !== undefined &&
+      (input.config === null || typeof input.config !== 'object' || Array.isArray(input.config))
+    ) {
+      throw new AppApiValidationError('Game configuration must be an object.')
+    }
+
+    try {
+      let config = (input.config ?? {}) as Record<string, unknown>
+      if (input.config === undefined) {
+        const existing = await this.gameConfigurations.get(communityId, input.gameKey)
+        config = existing?.config ?? {}
+      }
+      if (input.gameKey === 'word_seek') {
+        config = parseWordSeekConfig(config)
+      }
+      return await this.gameConfigurations.set({
+        communityId,
+        gameKey: input.gameKey,
+        enabled: input.enabled,
+        config,
+      })
+    } catch (error) {
+      if (error instanceof CommunityGameConfigError || error instanceof WordSeekError) {
+        throw new AppApiValidationError(error.message)
+      }
+      throw error
+    }
+  }
+
+  async adminTasks(actor: AppSessionActor, communityId: string, now = new Date()) {
+    await this.assertCommunityAdmin(actor, communityId)
+    const [tasks, pendingSubmissions] = await Promise.all([
+      this.socialTasks.listActive(communityId, now),
+      this.socialTasks.listPendingSubmissions(communityId, now),
+    ])
+
+    return {
+      tasks: tasks.map((task) => ({
+        id: task.id,
+        communityId: task.communityId,
+        title: task.title,
+        instructions: task.instructions,
+        points: task.points,
+        startsAt: task.startsAt,
+        endsAt: task.endsAt,
+        maxSubmissionsPerPlayer: task.maxSubmissionsPerPlayer,
+        cooldownDays: task.cooldownDays,
+        status: task.status,
+      })),
+      pendingSubmissions: pendingSubmissions.map(({ submission, task, player }) => ({
+        id: submission.id,
+        taskId: submission.taskId,
+        taskTitle: task.title,
+        player: {
+          displayName: player.displayName,
+          username: player.username,
+        },
+        reference: submission.reference,
+        status: submission.status,
+        createdAt: submission.createdAt,
+      })),
+    }
+  }
+
+  async adminCreateTask(
+    actor: AppSessionActor,
+    communityId: string,
+    input: {
+      readonly title: string
+      readonly instructions: string
+      readonly points: number
+      readonly startsAt: Date
+      readonly endsAt: Date
+      readonly maxSubmissionsPerPlayer?: number
+      readonly cooldownDays?: number
+    },
+  ) {
+    await this.assertCommunityAdmin(actor, communityId)
+    if (actor.telegramUserId === null) {
+      throw new AppApiForbiddenError('Pair Telegram before creating a community task.')
+    }
+    if (!input.title.trim() || !input.instructions.trim()) {
+      throw new AppApiValidationError('Task title and instructions are required.')
+    }
+    try {
+      return await this.socialTasks.createTask({
+        ...input,
+        communityId,
+        createdByTelegramUserId: actor.telegramUserId,
+      })
+    } catch (error) {
+      if (error instanceof SocialTaskError) throw new AppApiValidationError(error.message)
+      throw error
+    }
+  }
+
+  async adminArchiveExpiredTasks(actor: AppSessionActor, communityId: string, now = new Date()) {
+    await this.assertCommunityAdmin(actor, communityId)
+    return { archivedCount: await this.socialTasks.archiveExpired(now, communityId) }
+  }
+
+  async adminApproveSubmission(
+    actor: AppSessionActor,
+    communityId: string,
+    submissionId: string,
+    now = new Date(),
+  ) {
+    await this.assertCommunityAdmin(actor, communityId)
+    if (actor.telegramUserId === null) {
+      throw new AppApiForbiddenError('Pair Telegram before reviewing submissions.')
+    }
+    const community = await this.socialTasks.communityForSubmission(submissionId)
+    if (!community || community.communityId !== communityId) {
+      throw new AppApiNotFoundError('Social task submission not found.')
+    }
+    try {
+      return await this.socialTasks.approve({
+        submissionId,
+        reviewerTelegramUserId: actor.telegramUserId,
+        now,
+      })
+    } catch (error) {
+      if (error instanceof SocialTaskError) throw new AppApiValidationError(error.message)
+      throw error
+    }
+  }
+
+  async adminRejectSubmission(
+    actor: AppSessionActor,
+    communityId: string,
+    submissionId: string,
+    reason: string | undefined,
+    now = new Date(),
+  ) {
+    await this.assertCommunityAdmin(actor, communityId)
+    if (actor.telegramUserId === null) {
+      throw new AppApiForbiddenError('Pair Telegram before reviewing submissions.')
+    }
+    const community = await this.socialTasks.communityForSubmission(submissionId)
+    if (!community || community.communityId !== communityId) {
+      throw new AppApiNotFoundError('Social task submission not found.')
+    }
+    try {
+      return await this.socialTasks.reject({
+        submissionId,
+        reviewerTelegramUserId: actor.telegramUserId,
+        ...(reason === undefined ? {} : { reason }),
+        now,
+      })
+    } catch (error) {
+      if (error instanceof SocialTaskError) throw new AppApiValidationError(error.message)
+      throw error
+    }
+  }
+
+  async adminContent(actor: AppSessionActor, communityId: string) {
+    await this.assertCommunityAdmin(actor, communityId)
+    const [community] = await this.database
+      .select({ id: schema.communities.id })
+      .from(schema.communities)
+      .where(eq(schema.communities.id, communityId))
+      .limit(1)
+    if (!community) throw new AppApiNotFoundError('Community not found.')
+    const [questions, words] = await Promise.all([
+      this.questionBank.listCommunityQuestions(communityId),
+      this.wordSeek.listProjectWords(communityId),
+    ])
+    return { questions, words }
+  }
+
+  async adminCreateQuestionDraft(
+    actor: AppSessionActor,
+    communityId: string,
+    input: {
+      readonly sourceTitle: string
+      readonly sourceText: string
+      readonly prompt: string
+      readonly correctAnswer: string
+      readonly category: string
+      readonly difficulty: 'easy' | 'medium' | 'hard'
+    },
+  ) {
+    await this.assertCommunityAdmin(actor, communityId)
+    const question = {
+      mode: 'FIRST_CORRECT' as const,
+      prompt: input.prompt,
+      correctAnswer: input.correctAnswer,
+      acceptedAnswers: [input.correctAnswer],
+      category: input.category,
+      difficulty: input.difficulty,
+      sourceRefs: ['pending-source'],
+    }
+    try {
+      this.questionBank.validateGeneratedPack([question])
+      const source = await this.questionBank.ingestSource({
+        communityId,
+        type: 'PASTED_TEXT',
+        title: input.sourceTitle,
+        rawText: input.sourceText,
+      })
+      const [draft] = await this.questionBank.saveGeneratedDraftPack({
+        communityId,
+        sourceId: source.source.id,
+        questions: [{ ...question, sourceRefs: [source.source.id] }],
+      })
+      if (!draft) throw new AppApiValidationError('Question draft could not be created.')
+      return draft
+    } catch (error) {
+      if (error instanceof AppApiValidationError) throw error
+      if (error instanceof QuestionBankValidationError) {
+        throw new AppApiValidationError(error.message)
+      }
+      throw error
+    }
+  }
+
+  async adminApproveQuestion(actor: AppSessionActor, communityId: string, questionId: string) {
+    await this.assertCommunityAdmin(actor, communityId)
+    try {
+      return await this.questionBank.approveQuestion(questionId, communityId)
+    } catch (error) {
+      if (error instanceof QuestionBankValidationError) {
+        throw new AppApiValidationError(error.message)
+      }
+      throw error
+    }
+  }
+
+  async adminCreateWordDraft(
+    actor: AppSessionActor,
+    communityId: string,
+    input: { readonly word: string; readonly clue?: string; readonly sourceRef?: string },
+  ) {
+    await this.assertCommunityAdmin(actor, communityId)
+    try {
+      return await this.wordSeek.createProjectWord({ ...input, communityId })
+    } catch (error) {
+      if (error instanceof WordSeekError) throw new AppApiValidationError(error.message)
+      throw error
+    }
+  }
+
+  async adminApproveWord(actor: AppSessionActor, communityId: string, wordId: string) {
+    await this.assertCommunityAdmin(actor, communityId)
+    try {
+      return await this.wordSeek.approveProjectWord(wordId, communityId)
+    } catch (error) {
+      if (error instanceof WordSeekError) throw new AppApiValidationError(error.message)
+      throw error
     }
   }
 
@@ -452,16 +753,13 @@ export class AppApiService {
     if (actor.telegramUserId === null) {
       throw new AppApiForbiddenError('You are not an administrator for this community.')
     }
-    const [row] = await this.database
-      .select({ id: schema.communityAdmins.id })
-      .from(schema.communityAdmins)
-      .where(
-        and(
-          eq(schema.communityAdmins.communityId, communityId),
-          eq(schema.communityAdmins.telegramUserId, actor.telegramUserId),
-        ),
-      )
-      .limit(1)
-    if (!row) throw new AppApiForbiddenError('You are not an administrator for this community.')
+    try {
+      await assertCommunityAdmin(this.database, communityId, actor.telegramUserId)
+    } catch (error) {
+      if (error instanceof CommunityAuthorizationError) {
+        throw new AppApiForbiddenError('You are not an administrator for this community.')
+      }
+      throw error
+    }
   }
 }

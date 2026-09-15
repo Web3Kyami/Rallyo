@@ -227,6 +227,23 @@ export class WordSeekService {
     return this.activeSession(communityId)
   }
 
+  async listProjectWords(communityId: string) {
+    return this.database
+      .select({
+        id: schema.wordSeekWords.id,
+        word: schema.wordSeekWords.word,
+        wordLength: schema.wordSeekWords.wordLength,
+        clue: schema.wordSeekWords.clue,
+        sourceRef: schema.wordSeekWords.sourceRef,
+        status: schema.wordSeekWords.status,
+        createdAt: schema.wordSeekWords.createdAt,
+        updatedAt: schema.wordSeekWords.updatedAt,
+      })
+      .from(schema.wordSeekWords)
+      .where(eq(schema.wordSeekWords.communityId, communityId))
+      .orderBy(desc(schema.wordSeekWords.createdAt))
+  }
+
   async createProjectWord(input: {
     readonly communityId: string
     readonly word: string
