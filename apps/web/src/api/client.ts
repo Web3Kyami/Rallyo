@@ -169,6 +169,46 @@ export const api = {
       },
     ),
   logout: () => request<{ readonly ok: true }>('/api/app/session/logout', { method: 'POST' }),
+  operatorLogin: (accessKey: string) =>
+    request<{ readonly ok: true; readonly expiresAt: string }>('/api/operator/session', {
+      method: 'POST',
+      body: JSON.stringify({ accessKey }),
+    }),
+  operatorMe: () => request<OperatorBootstrap>('/api/operator/me'),
+  operatorOverview: () => request<OperatorOverview>('/api/operator/overview'),
+  operatorCommunities: (query?: string) =>
+    request<{ readonly communities: readonly OperatorCommunity[] }>(
+      query
+        ? `/api/operator/communities?query=${encodeURIComponent(query)}`
+        : '/api/operator/communities',
+    ),
+  operatorCommunity: (communityId: string) =>
+    request<OperatorCommunityDetail>(
+      `/api/operator/communities/${encodeURIComponent(communityId)}`,
+    ),
+  operatorPlayers: (query: string) =>
+    request<{ readonly players: readonly OperatorPlayerSearchResult[] }>(
+      `/api/operator/players?query=${encodeURIComponent(query)}`,
+    ),
+  operatorPlayer: (playerId: string) =>
+    request<OperatorPlayerDetail>(`/api/operator/players/${encodeURIComponent(playerId)}`),
+  operatorRevokeWallet: (playerId: string, walletIdentityId: string) =>
+    request<OperatorWalletRevocation>(
+      `/api/operator/players/${encodeURIComponent(playerId)}/wallet/revoke`,
+      { method: 'POST', body: JSON.stringify({ walletIdentityId }) },
+    ),
+  operatorRevokePairingCodes: (playerId: string) =>
+    request<{ readonly revokedCount: number }>(
+      `/api/operator/players/${encodeURIComponent(playerId)}/telegram/revoke-pairing`,
+      { method: 'POST' },
+    ),
+  operatorPrepareRecovery: (playerId: string) =>
+    request<{ readonly code: string; readonly expiresAt: string; readonly id: string }>(
+      `/api/operator/players/${encodeURIComponent(playerId)}/telegram/prepare-recovery`,
+      { method: 'POST' },
+    ),
+  operatorLogout: () =>
+    request<{ readonly ok: true }>('/api/operator/session/logout', { method: 'POST' }),
 }
 
 export type WalletAuthChallenge = {
@@ -397,4 +437,214 @@ export type AppAdminWord = {
 export type AppAdminContent = {
   readonly questions: readonly AppAdminQuestion[]
   readonly words: readonly AppAdminWord[]
+}
+
+export type OperatorScoreActivity = {
+  readonly id: string
+  readonly playerId: string
+  readonly playerName: string
+  readonly communityId: string
+  readonly communityTitle: string
+  readonly sourceType: 'QUIZ' | 'WORD_SEEK' | 'SCRAMBLE' | 'SOCIAL_TASK' | 'MANUAL'
+  readonly delta: number
+  readonly reason: string
+  readonly createdAt: string
+}
+
+export type OperatorSocialTaskMetrics = {
+  readonly total: number
+  readonly active: number
+  readonly paused: number
+  readonly archived: number
+  readonly submissions: number
+  readonly pending: number
+  readonly approved: number
+  readonly rejected: number
+}
+
+export type OperatorRewardMetrics = {
+  readonly total: number
+  readonly totalAmountLuna: string
+  readonly byStatus: Readonly<
+    Record<'ELIGIBLE' | 'CLAIMING' | 'SENT' | 'CONFIRMED' | 'FAILED', number>
+  >
+}
+
+export type OperatorOverview = {
+  readonly generatedAt: string
+  readonly metrics: {
+    readonly players: number
+    readonly communities: number
+    readonly activeSeasonCommunities: number
+    readonly totalScoreEvents: number
+    readonly recentScoreEvents: number
+    readonly telegramLinkedPlayers: number
+    readonly walletLinkedPlayers: number
+    readonly games: {
+      readonly projectQuiz: {
+        readonly rounds: number
+        readonly scoreEvents: number
+        readonly activeRounds: number
+      }
+      readonly scramble: {
+        readonly rounds: number
+        readonly scoreEvents: number
+        readonly activeRounds: number
+      }
+      readonly wordSeek: {
+        readonly sessions: number
+        readonly scoreEvents: number
+        readonly activeSessions: number
+      }
+    }
+    readonly socialTasks: OperatorSocialTaskMetrics
+    readonly rewards: OperatorRewardMetrics
+  }
+  readonly recentScoringActivity: readonly OperatorScoreActivity[]
+}
+
+export type OperatorBootstrap = {
+  readonly session: { readonly sessionId: string; readonly expiresAt: string }
+  readonly generatedAt: string
+  readonly overview: OperatorOverview
+}
+
+export type OperatorGameCapability = { readonly gameKey: string; readonly enabled: boolean }
+
+export type OperatorCommunity = {
+  readonly id: string
+  readonly title: string
+  readonly slug: string
+  readonly telegramChatId: string
+  readonly status: 'ACTIVE' | 'PAUSED' | 'ARCHIVED'
+  readonly timezone: string
+  readonly createdAt: string
+  readonly activeSeason: {
+    readonly id: string
+    readonly name: string
+    readonly startsAt: string
+    readonly endsAt: string
+  } | null
+  readonly playersWithScores: number
+  readonly scoreEventCount: number
+  readonly activeTaskCount: number
+  readonly pendingReviewCount: number
+  readonly lastMeaningfulActivity: string | null
+  readonly games: readonly OperatorGameCapability[]
+}
+
+export type OperatorCommunityDetail = {
+  readonly community: {
+    readonly id: string
+    readonly title: string
+    readonly slug: string
+    readonly telegramChatId: string
+    readonly status: 'ACTIVE' | 'PAUSED' | 'ARCHIVED'
+    readonly timezone: string
+    readonly automaticRoundsEnabled: boolean
+    readonly createdAt: string
+  }
+  readonly activeSeason: {
+    readonly id: string
+    readonly name: string
+    readonly startsAt: string
+    readonly endsAt: string
+    readonly status: 'DRAFT' | 'ACTIVE' | 'CLOSED'
+    readonly rewardPoolLuna: string | null
+  } | null
+  readonly stats: {
+    readonly playersWithScores: number
+    readonly scoreEventCount: number
+    readonly activeTaskCount: number
+    readonly pendingReviewCount: number
+    readonly lastMeaningfulActivity: string | null
+  }
+  readonly games: readonly OperatorGameCapability[]
+  readonly tasks: OperatorSocialTaskMetrics
+  readonly rewards: OperatorRewardMetrics
+  readonly topPlayers: readonly {
+    readonly playerId: string
+    readonly displayName: string
+    readonly rank: number
+    readonly scoreEventCount: number
+    readonly points: number
+  }[]
+  readonly recentScoringActivity: readonly OperatorScoreActivity[]
+}
+
+export type OperatorPlayerSearchResult = {
+  readonly id: string
+  readonly displayName: string
+  readonly username: string | null
+  readonly telegramUserId: string | null
+  readonly walletAddress: string | null
+  readonly createdAt: string
+  readonly lastSeenAt: string
+  readonly scoreEventCount: number
+  readonly totalPoints: number
+}
+
+export type OperatorPlayerDetail = {
+  readonly player: { readonly id: string; readonly createdAt: string; readonly lastSeenAt: string }
+  readonly telegramIdentities: readonly {
+    readonly id: string
+    readonly telegramUserId: string
+    readonly username: string | null
+    readonly displayName: string
+    readonly firstSeenAt: string
+    readonly lastSeenAt: string
+  }[]
+  readonly walletIdentities: readonly {
+    readonly id: string
+    readonly address: string
+    readonly linkedAt: string
+    readonly revokedAt: string | null
+  }[]
+  readonly adminRoles: readonly {
+    readonly communityId: string
+    readonly communityTitle: string
+    readonly telegramUserId: string
+    readonly lastVerifiedAt: string
+  }[]
+  readonly communities: readonly {
+    readonly communityId: string
+    readonly communityTitle: string
+    readonly communityStatus: string
+    readonly scoreEventCount: number
+    readonly points: number
+    readonly lastScoreAt: string | null
+  }[]
+  readonly scoreSummary: {
+    readonly totalScoreEvents: number
+    readonly totalPoints: number
+    readonly bySource: readonly {
+      readonly sourceType: string
+      readonly scoreEventCount: number
+      readonly points: number
+    }[]
+  }
+  readonly rewards: readonly {
+    readonly id: string
+    readonly communityTitle: string
+    readonly seasonName: string
+    readonly rank: number
+    readonly amountLuna: string
+    readonly status: string
+    readonly transactionHash: string | null
+    readonly createdAt: string
+  }[]
+  readonly recovery: { readonly unusedPairingCodes: number }
+  readonly audit: readonly {
+    readonly id: string
+    readonly action: string
+    readonly metadata: Record<string, unknown>
+    readonly createdAt: string
+  }[]
+}
+
+export type OperatorWalletRevocation = {
+  readonly id: string
+  readonly address: string
+  readonly revokedAt: string
+  readonly pendingRewardCount: number
 }

@@ -292,6 +292,52 @@ export const appSessions = pgTable(
   ],
 )
 
+export const operatorSessions = pgTable(
+  'operator_sessions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    uniqueIndex('operator_sessions_token_hash_unique').on(table.tokenHash),
+    index('operator_sessions_expiry_idx').on(table.expiresAt),
+  ],
+)
+
+export const operatorAuditEvents = pgTable(
+  'operator_audit_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    operatorSessionId: uuid('operator_session_id').references(() => operatorSessions.id, {
+      onDelete: 'set null',
+    }),
+    action: text('action').notNull(),
+    targetPlayerId: uuid('target_player_id').references(() => players.id, {
+      onDelete: 'set null',
+    }),
+    targetTelegramIdentityId: uuid('target_telegram_identity_id').references(
+      () => telegramIdentities.id,
+      { onDelete: 'set null' },
+    ),
+    targetWalletIdentityId: uuid('target_wallet_identity_id').references(
+      () => walletIdentities.id,
+      {
+        onDelete: 'set null',
+      },
+    ),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index('operator_audit_events_created_idx').on(table.createdAt),
+    index('operator_audit_events_player_idx').on(table.targetPlayerId, table.createdAt),
+  ],
+)
+
 export const communityGameConfigs = pgTable(
   'community_game_configs',
   {

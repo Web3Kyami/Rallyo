@@ -275,3 +275,116 @@ describe('server health', () => {
     await app.close()
   })
 })
+
+describe('Operator routes', () => {
+  afterEach(async () => {
+    await app?.close()
+  })
+
+  let app: ReturnType<typeof buildServer> | null = null
+
+  it('keeps Operator access separate from normal app sessions and rejects bad keys', async () => {
+    const authenticatedActor = {
+      sessionId: 'operator-session-1',
+      expiresAt: new Date('2026-09-15T20:00:00.000Z'),
+    }
+    const auth = {
+      configured: true,
+      authenticate: ({ accessKey }: { readonly accessKey: string }) =>
+        Promise.resolve(
+          accessKey === 'correct-key' ? { token: 'operator-token', ...authenticatedActor } : null,
+        ),
+      getSession: (token: string | undefined) =>
+        Promise.resolve(token === 'operator-token' ? authenticatedActor : null),
+      revokeSession: () => Promise.resolve(),
+    }
+    const consoleService = {
+      bootstrap: () => Promise.resolve({ generatedAt: new Date(), overview: { source: 'test' } }),
+      overview: () => Promise.resolve({ source: 'test' }),
+      listCommunities: () => Promise.resolve([]),
+      community: () => Promise.resolve({}),
+      searchPlayers: () => Promise.resolve([]),
+      player: () => Promise.resolve({}),
+    }
+    app = buildServer({
+      operatorSessionService: auth as never,
+      operatorConsoleService: consoleService as never,
+      appSessionService: {
+        getSession: (token: string | undefined) =>
+          Promise.resolve(
+            token === 'player-token'
+              ? {
+                  sessionId: 'player-session',
+                  playerId: 'player-1',
+                  telegramIdentityId: null,
+                  telegramUserId: null,
+                  targetCommunityId: null,
+                  targetMode: 'player' as const,
+                  expiresAt: new Date('2026-09-15T20:00:00.000Z'),
+                }
+              : null,
+          ),
+        revokeSession: () => Promise.resolve(),
+        exchangeCode: () => Promise.reject(new Error('not used')),
+      } as never,
+      appApiService: { bootstrap: () => Promise.resolve({ player: { id: 'player-1' } }) } as never,
+    })
+
+    const anonymous = await app.inject({ method: 'GET', url: '/api/operator/me' })
+    const playerSession = await app.inject({
+      method: 'GET',
+      url: '/api/operator/me',
+      headers: { cookie: 'rallyo_session=player-token' },
+    })
+    const wrongKey = await app.inject({
+      method: 'POST',
+      url: '/api/operator/session',
+      payload: { accessKey: 'wrong-key' },
+    })
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/operator/session',
+      payload: { accessKey: 'correct-key' },
+    })
+    const authenticated = await app.inject({
+      method: 'GET',
+      url: '/api/operator/me',
+      headers: { cookie: 'rallyo_operator_session=operator-token' },
+    })
+
+    expect(anonymous.statusCode).toBe(401)
+    expect(anonymous.json()).toMatchObject({ error: { code: 'OPERATOR_UNAUTHENTICATED' } })
+    expect(playerSession.statusCode).toBe(401)
+    expect(wrongKey.statusCode).toBe(401)
+    expect(login.statusCode).toBe(200)
+    expect(login.headers['set-cookie']).toContain('rallyo_operator_session=operator-token')
+    expect(login.headers['set-cookie']).toContain('SameSite=Strict')
+    expect(authenticated.statusCode).toBe(200)
+    await app.close()
+    app = null
+  })
+
+  it('does not expose a sign-in path when the Operator key is not configured', async () => {
+    const auth = {
+      configured: false,
+      authenticate: () => Promise.resolve(null),
+      getSession: () => Promise.resolve(null),
+      revokeSession: () => Promise.resolve(),
+    }
+    app = buildServer({
+      operatorSessionService: auth as never,
+      operatorConsoleService: { bootstrap: () => Promise.resolve({}) } as never,
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/operator/session',
+      payload: { accessKey: 'anything' },
+    })
+
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toMatchObject({ error: { code: 'OPERATOR_UNAVAILABLE' } })
+    await app.close()
+    app = null
+  })
+})

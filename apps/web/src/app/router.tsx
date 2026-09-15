@@ -6,10 +6,18 @@ import {
   useRouteError,
 } from 'react-router-dom'
 
-import { AdminGate, OperatorBoundary, PlayerGate, PublicShell } from './shells'
+import { AdminGate, PlayerGate, PublicShell } from './shells'
 import { AdminEntryPage, AdminOverviewPage, AdminSectionRoute } from './admin-views'
 import { DesignShowcasePage } from './design-showcase'
 import { OpenSessionPage, PublicHome } from './route-views'
+import {
+  OperatorBoundary,
+  OperatorCommunitiesPage,
+  OperatorCommunityDetailPage,
+  OperatorOverviewPage,
+  OperatorPlayerDetailPage,
+  OperatorPlayersPage,
+} from './operator-views'
 import {
   PlayerAvatarOnboardingPage,
   PlayerCommunitiesPage,
@@ -84,7 +92,18 @@ export const router = createBrowserRouter([
       { path: 'content', element: <AdminSectionRoute section="content" /> },
     ],
   },
-  { path: '/operator/*', element: <OperatorBoundary />, errorElement: <RouteErrorBoundary /> },
+  {
+    path: '/operator',
+    element: <OperatorBoundary />,
+    errorElement: <RouteErrorBoundary />,
+    children: [
+      { index: true, element: <OperatorOverviewPage /> },
+      { path: 'communities', element: <OperatorCommunitiesPage /> },
+      { path: 'communities/:communityId', element: <OperatorCommunityDetailPage /> },
+      { path: 'players', element: <OperatorPlayersPage /> },
+      { path: 'players/:playerId', element: <OperatorPlayerDetailPage /> },
+    ],
+  },
   ...(import.meta.env.DEV
     ? [
         {

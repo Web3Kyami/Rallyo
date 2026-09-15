@@ -60,57 +60,6 @@ export function AdminGate() {
   return <AdminShell />
 }
 
-export function OperatorBoundary() {
-  return (
-    <div className="operator-shell">
-      <aside className="operator-sidebar">
-        <Link className="brand-lockup" to="/">
-          <span className="brand-mark" aria-hidden="true">
-            R
-          </span>
-          <span>RALLYO</span>
-        </Link>
-        <div className="rail-context">
-          <span className="rail-context-label">OPERATOR CONSOLE</span>
-          <strong>Diagnostics</strong>
-          <span>Owner session required</span>
-        </div>
-        <nav className="desktop-nav" aria-label="Operator navigation">
-          <span className="app-nav-link active">
-            <Icon name="home" size={19} />
-            Overview
-          </span>
-          <span className="app-nav-link">
-            <Icon name="users" size={19} />
-            Communities
-          </span>
-          <span className="app-nav-link">
-            <Icon name="user" size={19} />
-            Identity support
-          </span>
-          <span className="app-nav-link">
-            <Icon name="wallet" size={19} />
-            Rewards
-          </span>
-        </nav>
-      </aside>
-      <main className="operator-workspace">
-        <div className="operator-card">
-          <p className="eyebrow">PRIVATE SURFACE</p>
-          <h1>Operator access is separate.</h1>
-          <p>
-            This boundary is reserved for the later owner session. Player and community admin
-            sessions cannot cross into operator controls.
-          </p>
-          <Link className="button button-primary" to="/">
-            Return to Rallyo
-          </Link>
-        </div>
-      </main>
-    </div>
-  )
-}
-
 function PlayerShell() {
   const session = useAppSession()
   const environment = detectEnvironment()

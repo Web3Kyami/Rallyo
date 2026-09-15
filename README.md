@@ -46,6 +46,8 @@ npm run dev:server
 
 For a local Telegram run, set `TELEGRAM_TRANSPORT=polling`; this does not require a public HTTPS endpoint. Keep all real credentials and wallet keys out of Git.
 
+The private Operator Console is available at `/operator` only when `OPERATOR_ACCESS_KEY` is configured. It uses its own HttpOnly session cookie and does not accept Player or Community Admin sessions.
+
 ## License
 
 MIT

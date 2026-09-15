@@ -11,6 +11,12 @@ import {
 import { AppWalletAuthError, AppWalletAuthService } from './core/app-wallet-auth-service'
 import { AppSessionError, AppSessionService } from './core/app-session-service'
 import type { WalletLinkService } from './core/wallet-link-service'
+import {
+  OperatorActionError,
+  OperatorConsoleNotFoundError,
+  OperatorConsoleService,
+} from './core/operator-console-service'
+import { OperatorSessionError, OperatorSessionService } from './core/operator-session-service'
 
 export type TelegramWebhookOptions = {
   readonly secretToken: string
@@ -25,6 +31,9 @@ export type ServerOptions = {
   readonly appSessionService?: AppSessionService
   readonly appApiService?: AppApiService
   readonly appWalletAuthService?: AppWalletAuthService
+  readonly operatorAccessKey?: string
+  readonly operatorSessionService?: OperatorSessionService
+  readonly operatorConsoleService?: OperatorConsoleService
   readonly appSessionCookieSecure?: boolean
 }
 
@@ -40,6 +49,17 @@ export function buildServer(options: ServerOptions = {}) {
   const appWalletAuthService =
     options.appWalletAuthService ??
     (options.database ? new AppWalletAuthService(options.database) : null)
+  const operatorSessionService =
+    options.operatorSessionService ??
+    (options.database
+      ? new OperatorSessionService(
+          options.database,
+          options.operatorAccessKey ?? process.env.OPERATOR_ACCESS_KEY,
+        )
+      : null)
+  const operatorConsoleService =
+    options.operatorConsoleService ??
+    (options.database ? new OperatorConsoleService(options.database) : null)
   const secureSessionCookie =
     options.appSessionCookieSecure ?? process.env.NODE_ENV === 'production'
 
@@ -594,6 +614,209 @@ export function buildServer(options: ServerOptions = {}) {
     )
   }
 
+  if (operatorSessionService && operatorConsoleService) {
+    app.post<{ Body: { accessKey?: string } }>('/api/operator/session', async (request, reply) => {
+      if (!operatorSessionService.configured) {
+        return sendApiError(
+          reply,
+          503,
+          'OPERATOR_UNAVAILABLE',
+          'Operator access is not configured on this server.',
+        )
+      }
+      const accessKey = request.body?.accessKey
+      if (typeof accessKey !== 'string' || accessKey.length === 0) {
+        return sendApiError(reply, 400, 'INVALID_REQUEST', 'An Operator access key is required.')
+      }
+      try {
+        const issued = await operatorSessionService.authenticate({ accessKey })
+        if (!issued) {
+          return sendApiError(reply, 401, 'OPERATOR_AUTH_FAILED', 'Operator access was denied.')
+        }
+        reply.header('set-cookie', operatorSessionCookie(issued.token, secureSessionCookie))
+        return { ok: true, expiresAt: issued.expiresAt }
+      } catch (error) {
+        if (error instanceof OperatorSessionError) {
+          return sendApiError(reply, 500, 'OPERATOR_SESSION_ERROR', error.message)
+        }
+        return sendApiError(
+          reply,
+          500,
+          'OPERATOR_SESSION_ERROR',
+          'Operator sign-in could not start.',
+        )
+      }
+    })
+
+    app.post('/api/operator/session/logout', async (request, reply) => {
+      await operatorSessionService.revokeSession(
+        readCookie(request.headers.cookie, 'rallyo_operator_session'),
+      )
+      reply.header('set-cookie', clearOperatorSessionCookie(secureSessionCookie))
+      return { ok: true }
+    })
+
+    app.get('/api/operator/me', async (request, reply) => {
+      const actor = await requireOperatorSession(
+        request.headers.cookie,
+        operatorSessionService,
+        reply,
+      )
+      if (!actor) return
+      try {
+        return { session: actor, ...(await operatorConsoleService.bootstrap()) }
+      } catch (error) {
+        return sendOperatorError(reply, error)
+      }
+    })
+
+    app.get('/api/operator/overview', async (request, reply) => {
+      const actor = await requireOperatorSession(
+        request.headers.cookie,
+        operatorSessionService,
+        reply,
+      )
+      if (!actor) return
+      try {
+        return await operatorConsoleService.overview()
+      } catch (error) {
+        return sendOperatorError(reply, error)
+      }
+    })
+
+    app.get<{ Querystring: { query?: string } }>(
+      '/api/operator/communities',
+      async (request, reply) => {
+        const actor = await requireOperatorSession(
+          request.headers.cookie,
+          operatorSessionService,
+          reply,
+        )
+        if (!actor) return
+        try {
+          return { communities: await operatorConsoleService.listCommunities(request.query.query) }
+        } catch (error) {
+          return sendOperatorError(reply, error)
+        }
+      },
+    )
+
+    app.get<{ Params: { communityId: string } }>(
+      '/api/operator/communities/:communityId',
+      async (request, reply) => {
+        const actor = await requireOperatorSession(
+          request.headers.cookie,
+          operatorSessionService,
+          reply,
+        )
+        if (!actor) return
+        try {
+          return await operatorConsoleService.community(request.params.communityId)
+        } catch (error) {
+          return sendOperatorError(reply, error)
+        }
+      },
+    )
+
+    app.get<{ Querystring: { query?: string } }>(
+      '/api/operator/players',
+      async (request, reply) => {
+        const actor = await requireOperatorSession(
+          request.headers.cookie,
+          operatorSessionService,
+          reply,
+        )
+        if (!actor) return
+        try {
+          return { players: await operatorConsoleService.searchPlayers(request.query.query) }
+        } catch (error) {
+          return sendOperatorError(reply, error)
+        }
+      },
+    )
+
+    app.get<{ Params: { playerId: string } }>(
+      '/api/operator/players/:playerId',
+      async (request, reply) => {
+        const actor = await requireOperatorSession(
+          request.headers.cookie,
+          operatorSessionService,
+          reply,
+        )
+        if (!actor) return
+        try {
+          return await operatorConsoleService.player(request.params.playerId)
+        } catch (error) {
+          return sendOperatorError(reply, error)
+        }
+      },
+    )
+
+    app.post<{
+      Params: { playerId: string }
+      Body: { walletIdentityId?: string }
+    }>('/api/operator/players/:playerId/wallet/revoke', async (request, reply) => {
+      const actor = await requireOperatorSession(
+        request.headers.cookie,
+        operatorSessionService,
+        reply,
+      )
+      if (!actor) return
+      if (typeof request.body?.walletIdentityId !== 'string') {
+        return sendApiError(reply, 400, 'INVALID_REQUEST', 'A wallet identity is required.')
+      }
+      try {
+        return await operatorConsoleService.revokeWallet({
+          playerId: request.params.playerId,
+          walletIdentityId: request.body.walletIdentityId,
+          operatorSessionId: actor.sessionId,
+        })
+      } catch (error) {
+        return sendOperatorError(reply, error)
+      }
+    })
+
+    app.post<{ Params: { playerId: string } }>(
+      '/api/operator/players/:playerId/telegram/revoke-pairing',
+      async (request, reply) => {
+        const actor = await requireOperatorSession(
+          request.headers.cookie,
+          operatorSessionService,
+          reply,
+        )
+        if (!actor) return
+        try {
+          return await operatorConsoleService.revokePairingCodes({
+            playerId: request.params.playerId,
+            operatorSessionId: actor.sessionId,
+          })
+        } catch (error) {
+          return sendOperatorError(reply, error)
+        }
+      },
+    )
+
+    app.post<{ Params: { playerId: string } }>(
+      '/api/operator/players/:playerId/telegram/prepare-recovery',
+      async (request, reply) => {
+        const actor = await requireOperatorSession(
+          request.headers.cookie,
+          operatorSessionService,
+          reply,
+        )
+        if (!actor) return
+        try {
+          return await operatorConsoleService.prepareTelegramRecovery({
+            playerId: request.params.playerId,
+            operatorSessionId: actor.sessionId,
+          })
+        } catch (error) {
+          return sendOperatorError(reply, error)
+        }
+      },
+    )
+  }
+
   return app
 }
 
@@ -608,6 +831,28 @@ async function requireAppSession(
     return null
   }
   return session
+}
+
+async function requireOperatorSession(
+  cookieHeader: string | undefined,
+  service: OperatorSessionService,
+  reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } },
+) {
+  if (!service.configured) {
+    sendApiError(reply, 503, 'OPERATOR_UNAVAILABLE', 'Operator access is not configured.')
+    return null
+  }
+  try {
+    const session = await service.getSession(readCookie(cookieHeader, 'rallyo_operator_session'))
+    if (!session) {
+      sendApiError(reply, 401, 'OPERATOR_UNAUTHENTICATED', 'Operator sign-in is required.')
+      return null
+    }
+    return session
+  } catch {
+    sendApiError(reply, 500, 'OPERATOR_SESSION_ERROR', 'Operator session could not be checked.')
+    return null
+  }
 }
 
 function sendSessionError(
@@ -657,6 +902,24 @@ function readAdminDate(value: unknown, label: string): Date {
   return new Date(timestamp)
 }
 
+function sendOperatorError(
+  reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } },
+  error: unknown,
+) {
+  if (error instanceof OperatorConsoleNotFoundError) {
+    return sendApiError(reply, 404, 'NOT_FOUND', error.message)
+  }
+  if (error instanceof OperatorActionError) {
+    return sendApiError(reply, 400, 'OPERATOR_ACTION_FAILED', error.message)
+  }
+  return sendApiError(
+    reply,
+    500,
+    'OPERATOR_API_ERROR',
+    'The Operator console could not load this state.',
+  )
+}
+
 function sendApiError(
   reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } },
   statusCode: number,
@@ -667,11 +930,15 @@ function sendApiError(
 }
 
 function readSessionCookie(cookieHeader: string | undefined): string | undefined {
+  return readCookie(cookieHeader, 'rallyo_session')
+}
+
+function readCookie(cookieHeader: string | undefined, name: string): string | undefined {
   const value = cookieHeader
     ?.split(';')
     .map((part) => part.trim())
-    .find((part) => part.startsWith('rallyo_session='))
-    ?.slice('rallyo_session='.length)
+    .find((part) => part.startsWith(`${name}=`))
+    ?.slice(`${name}=`.length)
   if (!value) return undefined
   try {
     return decodeURIComponent(value)
@@ -697,6 +964,28 @@ function clearSessionCookie(secure: boolean): string {
     'Path=/',
     'HttpOnly',
     'SameSite=Lax',
+    'Max-Age=0',
+    ...(secure ? ['Secure'] : []),
+  ].join('; ')
+}
+
+function operatorSessionCookie(token: string, secure: boolean): string {
+  return [
+    `rallyo_operator_session=${encodeURIComponent(token)}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Strict',
+    'Max-Age=43200',
+    ...(secure ? ['Secure'] : []),
+  ].join('; ')
+}
+
+function clearOperatorSessionCookie(secure: boolean): string {
+  return [
+    'rallyo_operator_session=',
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Strict',
     'Max-Age=0',
     ...(secure ? ['Secure'] : []),
   ].join('; ')

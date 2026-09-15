@@ -39,6 +39,10 @@ export function SessionProvider({ children }: { readonly children: React.ReactNo
   }
 
   useEffect(() => {
+    if (window.location.pathname.startsWith('/operator')) {
+      setState({ status: 'anonymous', data: null, error: null })
+      return
+    }
     void refresh()
   }, [])
 

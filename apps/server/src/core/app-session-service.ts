@@ -105,28 +105,7 @@ export class AppSessionService {
     readonly telegramIdentityId: string
     readonly now?: Date
   }) {
-    const now = input.now ?? new Date()
-    const [identity] = await this.database
-      .select({ id: schema.telegramIdentities.id })
-      .from(schema.telegramIdentities)
-      .where(eq(schema.telegramIdentities.id, input.telegramIdentityId))
-      .limit(1)
-    if (!identity) throw new AppSessionError('Telegram identity could not be loaded.')
-
-    const code = randomPairingCode()
-    const [row] = await this.database
-      .insert(schema.telegramPairingCodes)
-      .values({
-        telegramIdentityId: identity.id,
-        codeHash: hash(code),
-        expiresAt: new Date(now.getTime() + TELEGRAM_PAIRING_TTL_MS),
-      })
-      .returning({
-        id: schema.telegramPairingCodes.id,
-        expiresAt: schema.telegramPairingCodes.expiresAt,
-      })
-    if (!row) throw new AppSessionError('Telegram pairing code could not be created.')
-    return { code, expiresAt: row.expiresAt, id: row.id }
+    return issueTelegramPairingCode(this.database, input)
   }
 
   async exchangeCode(input: {
@@ -312,6 +291,37 @@ export class AppSessionService {
         and(eq(schema.appSessions.tokenHash, hash(token)), isNull(schema.appSessions.revokedAt)),
       )
   }
+}
+
+export async function issueTelegramPairingCode(
+  database: AppSessionDatabaseExecutor,
+  input: {
+    readonly telegramIdentityId: string
+    readonly now?: Date
+  },
+) {
+  const now = input.now ?? new Date()
+  const [identity] = await database
+    .select({ id: schema.telegramIdentities.id })
+    .from(schema.telegramIdentities)
+    .where(eq(schema.telegramIdentities.id, input.telegramIdentityId))
+    .limit(1)
+  if (!identity) throw new AppSessionError('Telegram identity could not be loaded.')
+
+  const code = randomPairingCode()
+  const [row] = await database
+    .insert(schema.telegramPairingCodes)
+    .values({
+      telegramIdentityId: identity.id,
+      codeHash: hash(code),
+      expiresAt: new Date(now.getTime() + TELEGRAM_PAIRING_TTL_MS),
+    })
+    .returning({
+      id: schema.telegramPairingCodes.id,
+      expiresAt: schema.telegramPairingCodes.expiresAt,
+    })
+  if (!row) throw new AppSessionError('Telegram pairing code could not be created.')
+  return { code, expiresAt: row.expiresAt, id: row.id }
 }
 
 export async function createAppSession(
