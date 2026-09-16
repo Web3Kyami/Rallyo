@@ -47,6 +47,10 @@ const app = buildServer({
         ...(environment.APP_BASE_URL ? { walletLinkOrigin: environment.APP_BASE_URL } : {}),
       }
     : {}),
+  ...(environment.APP_BASE_URL ? { appCorsOrigin: environment.APP_BASE_URL } : {}),
+  ...(environment.OPERATOR_ACCESS_KEY
+    ? { operatorAccessKey: environment.OPERATOR_ACCESS_KEY }
+    : {}),
 })
 
 await app.listen({ host: '0.0.0.0', port })

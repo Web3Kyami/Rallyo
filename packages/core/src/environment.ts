@@ -14,6 +14,7 @@ export const environmentSchema = z.object({
   TELEGRAM_TRANSPORT: optionalValue(z.enum(['polling', 'webhook'])),
   APP_BASE_URL: optionalUrl,
   SESSION_SECRET: optionalValue(z.string().min(32)),
+  OPERATOR_ACCESS_KEY: optionalValue(z.string().min(16)),
   LLM_API_KEY: optionalSecret,
   LLM_MODEL: optionalValue(z.string().min(1)),
   NIMIQ_NETWORK: optionalValue(z.enum(['mainnet', 'testnet'])),

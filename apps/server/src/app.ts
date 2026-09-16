@@ -27,6 +27,7 @@ export type ServerOptions = {
   readonly telegramWebhook?: TelegramWebhookOptions
   readonly walletLinkService?: WalletLinkService
   readonly walletLinkOrigin?: string
+  readonly appCorsOrigin?: string
   readonly database?: RallyoDatabase
   readonly appSessionService?: AppSessionService
   readonly appApiService?: AppApiService
@@ -42,6 +43,7 @@ export function buildServer(options: ServerOptions = {}) {
   const telegramWebhook = options.telegramWebhook
   const walletLinkService = options.walletLinkService
   const walletLinkOrigin = options.walletLinkOrigin
+  const appCorsOrigin = options.appCorsOrigin
   const appSessionService =
     options.appSessionService ?? (options.database ? new AppSessionService(options.database) : null)
   const appApiService =
@@ -62,6 +64,20 @@ export function buildServer(options: ServerOptions = {}) {
     (options.database ? new OperatorConsoleService(options.database) : null)
   const secureSessionCookie =
     options.appSessionCookieSecure ?? process.env.NODE_ENV === 'production'
+  const crossOriginSessionCookies = options.appCorsOrigin !== undefined
+
+  if (appCorsOrigin) {
+    app.addHook('onSend', async (request, reply) => {
+      const requestOrigin = request.headers.origin
+      if (requestOrigin && requestOrigin !== appCorsOrigin) return
+      reply.header('access-control-allow-origin', appCorsOrigin)
+      reply.header('access-control-allow-credentials', 'true')
+      reply.header('access-control-allow-headers', 'content-type')
+      reply.header('access-control-allow-methods', 'GET, HEAD, POST, PATCH, OPTIONS')
+      reply.header('vary', 'Origin')
+    })
+    app.options('/api/*', async (_request, reply) => reply.code(204).send())
+  }
 
   app.get('/health', () => ({ status: 'ok' }))
 
@@ -145,7 +161,10 @@ export function buildServer(options: ServerOptions = {}) {
       }
       try {
         const exchanged = await appSessionService.exchangeCode({ code })
-        reply.header('set-cookie', sessionCookie(exchanged.token, secureSessionCookie))
+        reply.header(
+          'set-cookie',
+          sessionCookie(exchanged.token, secureSessionCookie, crossOriginSessionCookies),
+        )
         return {
           ok: true,
           redirectPath: exchanged.redirectPath,
@@ -158,7 +177,7 @@ export function buildServer(options: ServerOptions = {}) {
 
     app.post('/api/app/session/logout', async (request, reply) => {
       await appSessionService.revokeSession(readSessionCookie(request.headers.cookie))
-      reply.header('set-cookie', clearSessionCookie(secureSessionCookie))
+      reply.header('set-cookie', clearSessionCookie(secureSessionCookie, crossOriginSessionCookies))
       return { ok: true }
     })
 
@@ -236,7 +255,10 @@ export function buildServer(options: ServerOptions = {}) {
           publicKey: publicKey as string,
           signature: signature as string,
         })
-        reply.header('set-cookie', sessionCookie(completed.token, secureSessionCookie))
+        reply.header(
+          'set-cookie',
+          sessionCookie(completed.token, secureSessionCookie, crossOriginSessionCookies),
+        )
         return {
           ok: true,
           redirectPath: completed.redirectPath,
@@ -633,7 +655,10 @@ export function buildServer(options: ServerOptions = {}) {
         if (!issued) {
           return sendApiError(reply, 401, 'OPERATOR_AUTH_FAILED', 'Operator access was denied.')
         }
-        reply.header('set-cookie', operatorSessionCookie(issued.token, secureSessionCookie))
+        reply.header(
+          'set-cookie',
+          operatorSessionCookie(issued.token, secureSessionCookie, crossOriginSessionCookies),
+        )
         return { ok: true, expiresAt: issued.expiresAt }
       } catch (error) {
         if (error instanceof OperatorSessionError) {
@@ -652,7 +677,10 @@ export function buildServer(options: ServerOptions = {}) {
       await operatorSessionService.revokeSession(
         readCookie(request.headers.cookie, 'rallyo_operator_session'),
       )
-      reply.header('set-cookie', clearOperatorSessionCookie(secureSessionCookie))
+      reply.header(
+        'set-cookie',
+        clearOperatorSessionCookie(secureSessionCookie, crossOriginSessionCookies),
+      )
       return { ok: true }
     })
 
@@ -947,45 +975,45 @@ function readCookie(cookieHeader: string | undefined, name: string): string | un
   }
 }
 
-function sessionCookie(token: string, secure: boolean): string {
+function sessionCookie(token: string, secure: boolean, crossOrigin: boolean): string {
   return [
     `rallyo_session=${encodeURIComponent(token)}`,
     'Path=/',
     'HttpOnly',
-    'SameSite=Lax',
+    `SameSite=${secure && crossOrigin ? 'None' : 'Lax'}`,
     'Max-Age=2592000',
     ...(secure ? ['Secure'] : []),
   ].join('; ')
 }
 
-function clearSessionCookie(secure: boolean): string {
+function clearSessionCookie(secure: boolean, crossOrigin: boolean): string {
   return [
     'rallyo_session=',
     'Path=/',
     'HttpOnly',
-    'SameSite=Lax',
+    `SameSite=${secure && crossOrigin ? 'None' : 'Lax'}`,
     'Max-Age=0',
     ...(secure ? ['Secure'] : []),
   ].join('; ')
 }
 
-function operatorSessionCookie(token: string, secure: boolean): string {
+function operatorSessionCookie(token: string, secure: boolean, crossOrigin: boolean): string {
   return [
     `rallyo_operator_session=${encodeURIComponent(token)}`,
     'Path=/',
     'HttpOnly',
-    'SameSite=Strict',
+    `SameSite=${secure && crossOrigin ? 'None' : 'Strict'}`,
     'Max-Age=43200',
     ...(secure ? ['Secure'] : []),
   ].join('; ')
 }
 
-function clearOperatorSessionCookie(secure: boolean): string {
+function clearOperatorSessionCookie(secure: boolean, crossOrigin: boolean): string {
   return [
     'rallyo_operator_session=',
     'Path=/',
     'HttpOnly',
-    'SameSite=Strict',
+    `SameSite=${secure && crossOrigin ? 'None' : 'Strict'}`,
     'Max-Age=0',
     ...(secure ? ['Secure'] : []),
   ].join('; ')

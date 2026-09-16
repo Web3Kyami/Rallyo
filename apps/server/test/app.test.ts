@@ -107,6 +107,49 @@ describe('server health', () => {
     await sessionApp.close()
   })
 
+  it('supports credentialed cross-origin app sessions from the configured web origin', async () => {
+    const sessionApp = buildServer({
+      appCorsOrigin: 'https://rallyo.vercel.app',
+      appSessionCookieSecure: true,
+      appSessionService: {
+        exchangeCode: () =>
+          Promise.resolve({
+            token: 'cross-origin-session',
+            redirectPath: '/app',
+            expiresAt: new Date('2026-09-14T20:00:00.000Z'),
+          }),
+        getSession: () => Promise.resolve(null),
+        revokeSession: () => Promise.resolve(),
+      } as never,
+    })
+
+    const preflight = await sessionApp.inject({
+      method: 'OPTIONS',
+      url: '/api/app/session/exchange',
+      headers: { origin: 'https://rallyo.vercel.app' },
+    })
+    const response = await sessionApp.inject({
+      method: 'POST',
+      url: '/api/app/session/exchange',
+      headers: { origin: 'https://rallyo.vercel.app' },
+      payload: { code: 'one-time-code' },
+    })
+    const rejected = await sessionApp.inject({
+      method: 'GET',
+      url: '/health',
+      headers: { origin: 'https://not-rallyo.example' },
+    })
+
+    expect(preflight.statusCode).toBe(204)
+    expect(preflight.headers['access-control-allow-origin']).toBe('https://rallyo.vercel.app')
+    expect(preflight.headers['access-control-allow-credentials']).toBe('true')
+    expect(response.headers['access-control-allow-origin']).toBe('https://rallyo.vercel.app')
+    expect(response.headers['set-cookie']).toContain('SameSite=None')
+    expect(response.headers['set-cookie']).toContain('Secure')
+    expect(rejected.headers['access-control-allow-origin']).toBeUndefined()
+    await sessionApp.close()
+  })
+
   it('exposes wallet-first app authentication and Telegram pairing routes', async () => {
     const walletApp = buildServer({
       walletLinkOrigin: 'https://pay.example',
