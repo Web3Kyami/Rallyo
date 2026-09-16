@@ -53,7 +53,7 @@ const app = buildServer({
     : {}),
 })
 
-await app.listen({ host: '0.0.0.0', port })
+await app.listen({ host: environment.NODE_ENV === 'production' ? '127.0.0.1' : '0.0.0.0', port })
 
 let pollingStarted = false
 const stopClueRevealScheduler = telegramRuntime?.startClueRevealScheduler() ?? null
