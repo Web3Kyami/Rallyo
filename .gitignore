@@ -4,6 +4,7 @@
 # Agent tooling installed locally, never part of the application
 .agents/
 .codex/
+.playwright-cli/
 skills-lock.json
 
 # Environment / secrets

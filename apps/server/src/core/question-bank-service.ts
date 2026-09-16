@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 
 import { normalizeAnswer } from '@rallyo/core'
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { z } from 'zod'
 
 import type { RallyoDatabase } from '../db/client'
@@ -85,6 +85,26 @@ export class QuestionBankValidationError extends Error {
 export class QuestionBankService {
   constructor(private readonly database: RallyoDatabase) {}
 
+  async listCommunityQuestions(communityId: string) {
+    return this.database
+      .select({
+        id: schema.questions.id,
+        mode: schema.questions.mode,
+        category: schema.questions.category,
+        difficulty: schema.questions.difficulty,
+        prompt: schema.questions.prompt,
+        basePoints: schema.questions.basePoints,
+        status: schema.questions.status,
+        source: schema.questions.source,
+        createdAt: schema.questions.createdAt,
+      })
+      .from(schema.questions)
+      .where(
+        and(eq(schema.questions.scope, 'COMMUNITY'), eq(schema.questions.communityId, communityId)),
+      )
+      .orderBy(desc(schema.questions.createdAt))
+  }
+
   async ingestSource(input: {
     readonly communityId: string
     readonly type: 'PASTED_TEXT' | 'MARKDOWN' | 'FAQ'
@@ -133,6 +153,17 @@ export class QuestionBankService {
     readonly questions: unknown
   }) {
     const pack = this.validateGeneratedPack(input.questions)
+    const [source] = await this.database
+      .select({ id: schema.knowledgeSources.id })
+      .from(schema.knowledgeSources)
+      .where(
+        and(
+          eq(schema.knowledgeSources.id, input.sourceId),
+          eq(schema.knowledgeSources.communityId, input.communityId),
+        ),
+      )
+      .limit(1)
+    if (!source) throw new QuestionBankValidationError('Knowledge source is not in this community.')
     if (pack.some((question) => !question.sourceRefs.includes(input.sourceId))) {
       throw new QuestionBankValidationError(
         'Every generated question must reference its source record.',
@@ -184,11 +215,17 @@ export class QuestionBankService {
     })
   }
 
-  async approveQuestion(questionId: string) {
+  async approveQuestion(questionId: string, communityId?: string) {
     const [question] = await this.database
       .update(schema.questions)
       .set({ status: 'APPROVED' })
-      .where(and(eq(schema.questions.id, questionId), eq(schema.questions.status, 'DRAFT')))
+      .where(
+        and(
+          eq(schema.questions.id, questionId),
+          eq(schema.questions.status, 'DRAFT'),
+          ...(communityId ? [eq(schema.questions.communityId, communityId)] : []),
+        ),
+      )
       .returning()
     if (!question) throw new QuestionBankValidationError('Only an existing draft can be approved.')
     return question

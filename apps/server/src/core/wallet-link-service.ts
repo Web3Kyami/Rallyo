@@ -40,7 +40,7 @@ export class WalletLinkService {
     readonly now?: Date
   }) {
     const now = input.now ?? new Date()
-    const normalizedAddress = normalizeAddress(input.address)
+    const normalizedAddress = normalizeNimiqAddress(input.address)
     return this.database.transaction(async (tx) => {
       const [code] = await tx
         .select()
@@ -115,18 +115,17 @@ export class WalletLinkService {
         throw new WalletLinkError('Wallet challenge is invalid, expired, or already used.')
       }
 
-      let valid = false
-      try {
-        const publicKey = PublicKey.fromHex(input.publicKey)
-        const signature = Signature.fromHex(input.signature)
-        valid =
-          hash(input.message) === challenge.messageHash &&
-          publicKey.verify(signature, BufferUtils.fromUtf8(input.message)) &&
-          publicKey.toAddress().toUserFriendlyAddress() === challenge.address
-      } catch {
-        // Invalid key or signature leaves the verification result false.
+      if (
+        !verifyNimiqWalletSignature({
+          message: input.message,
+          messageHash: challenge.messageHash,
+          publicKeyHex: input.publicKey,
+          signatureHex: input.signature,
+          expectedAddress: challenge.address,
+        })
+      ) {
+        throw new WalletLinkError('Wallet signature verification failed.')
       }
-      if (!valid) throw new WalletLinkError('Wallet signature verification failed.')
 
       const [wallet] = await tx
         .insert(schema.walletIdentities)
@@ -151,11 +150,31 @@ export class WalletLinkService {
   }
 }
 
-function normalizeAddress(value: string): string {
+export function normalizeNimiqAddress(value: string): string {
   try {
     return Address.fromUserFriendlyAddress(value).toUserFriendlyAddress()
   } catch {
     throw new WalletLinkError('Invalid Nimiq address.')
+  }
+}
+
+export function verifyNimiqWalletSignature(input: {
+  readonly message: string
+  readonly messageHash: string
+  readonly publicKeyHex: string
+  readonly signatureHex: string
+  readonly expectedAddress: string
+}): boolean {
+  try {
+    const publicKey = PublicKey.fromHex(input.publicKeyHex)
+    const signature = Signature.fromHex(input.signatureHex)
+    return (
+      hash(input.message) === input.messageHash &&
+      publicKey.verify(signature, BufferUtils.fromUtf8(input.message)) &&
+      publicKey.toAddress().toUserFriendlyAddress() === input.expectedAddress
+    )
+  } catch {
+    return false
   }
 }
 

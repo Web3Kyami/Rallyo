@@ -49,4 +49,23 @@ export class ActivityService {
       )
       .orderBy(schema.communityActivityRollups.bucketStart)
   }
+
+  async summary(input: { readonly communityId: string }) {
+    const [row] = await this.database
+      .select({
+        messageCount: sql<string>`coalesce(sum(${schema.communityActivityRollups.messageCount}), 0)`,
+        replyCount: sql<string>`coalesce(sum(${schema.communityActivityRollups.replyCount}), 0)`,
+        activePlayers: sql<string>`count(distinct ${schema.communityActivityRollups.playerId})`,
+        lastBucketAt: sql<Date | null>`max(${schema.communityActivityRollups.bucketStart})`,
+      })
+      .from(schema.communityActivityRollups)
+      .where(eq(schema.communityActivityRollups.communityId, input.communityId))
+
+    return {
+      messageCount: Number(row?.messageCount ?? 0),
+      replyCount: Number(row?.replyCount ?? 0),
+      activePlayers: Number(row?.activePlayers ?? 0),
+      lastBucketAt: row?.lastBucketAt ?? null,
+    }
+  }
 }

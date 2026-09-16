@@ -29,6 +29,7 @@ if (telegramRuntime && telegramTransport === 'webhook' && !environment.TELEGRAM_
 }
 
 const app = buildServer({
+  ...(databaseResources ? { database: databaseResources.db } : {}),
   ...(telegramRuntime && telegramTransport === 'webhook' && environment.TELEGRAM_WEBHOOK_SECRET
     ? {
         telegramWebhook: {

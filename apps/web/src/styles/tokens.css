@@ -1,0 +1,67 @@
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root {
+  color-scheme: light;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+
+  --ink: #111111;
+  --bg: #f7f7f2;
+  --surface: #ffffff;
+  --surface-muted: #ecede7;
+  --text: #111111;
+  --text-muted: #5f615b;
+  --border: #111111;
+  --rallyo: #ff6b3d;
+  --rallyo-soft: #ffe3d8;
+  --focus: #3366ff;
+  --quiz: #ffb84d;
+  --scramble: #ff6b97;
+  --word-seek: #44d6b0;
+  --lime-highlight: #d8ff52;
+  --success: #159a6b;
+  --warning: #d98a00;
+  --danger: #d94747;
+  --info: #3a72e8;
+  --border-quiet: #d2d4cd;
+  --border-muted: #aeb1a8;
+  --shadow-primary: 4px 4px 0 var(--ink);
+  --shadow-secondary: 2px 2px 0 var(--ink);
+
+  --radius-control: 8px;
+  --radius-card: 10px;
+  --radius-panel: 14px;
+  --radius-pill: 999px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+  --space-10: 64px;
+
+  --font-display: 'Bricolage Grotesque', 'Arial Black', ui-sans-serif, sans-serif;
+  --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+
+  /* Compatibility aliases used by the Phase 8A shell. */
+  --surface-0: var(--bg);
+  --surface-1: var(--surface);
+  --surface-2: var(--surface-muted);
+  --surface-inverse: var(--ink);
+  --text-strong: var(--text);
+  --text-on-inverse: var(--surface);
+  --accent: var(--rallyo);
+  --accent-strong: #e9532b;
+  --line: var(--border-quiet);
+  --line-strong: var(--border);
+  --shadow: var(--shadow-secondary);
+  --radius-sm: var(--radius-control);
+  --radius-md: var(--radius-card);
+  --radius-lg: var(--radius-panel);
+}

@@ -228,6 +228,138 @@ export const communityAdmins = pgTable(
   ],
 )
 
+export const appSessionCodes = pgTable(
+  'app_session_codes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    playerId: uuid('player_id')
+      .notNull()
+      .references(() => players.id, { onDelete: 'cascade' }),
+    telegramIdentityId: uuid('telegram_identity_id')
+      .notNull()
+      .references(() => telegramIdentities.id, { onDelete: 'cascade' }),
+    targetCommunityId: uuid('target_community_id').references(() => communities.id, {
+      onDelete: 'set null',
+    }),
+    targetMode: text('target_mode').notNull().default('player'),
+    codeHash: text('code_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    uniqueIndex('app_session_codes_code_hash_unique').on(table.codeHash),
+    index('app_session_codes_expiry_idx').on(table.expiresAt),
+  ],
+)
+
+export const telegramPairingCodes = pgTable(
+  'telegram_pairing_codes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    telegramIdentityId: uuid('telegram_identity_id')
+      .notNull()
+      .references(() => telegramIdentities.id, { onDelete: 'cascade' }),
+    codeHash: text('code_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    uniqueIndex('telegram_pairing_codes_code_hash_unique').on(table.codeHash),
+    index('telegram_pairing_codes_expiry_idx').on(table.expiresAt),
+  ],
+)
+
+export const appWalletChallenges = pgTable(
+  'app_wallet_challenges',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    address: text('address').notNull(),
+    nonceHash: text('nonce_hash').notNull(),
+    messageHash: text('message_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    uniqueIndex('app_wallet_challenges_nonce_hash_unique').on(table.nonceHash),
+    index('app_wallet_challenges_address_expiry_idx').on(table.address, table.expiresAt),
+  ],
+)
+
+export const appSessions = pgTable(
+  'app_sessions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    playerId: uuid('player_id')
+      .notNull()
+      .references(() => players.id, { onDelete: 'cascade' }),
+    telegramIdentityId: uuid('telegram_identity_id').references(() => telegramIdentities.id, {
+      onDelete: 'cascade',
+    }),
+    targetCommunityId: uuid('target_community_id').references(() => communities.id, {
+      onDelete: 'set null',
+    }),
+    targetMode: text('target_mode').notNull().default('player'),
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    uniqueIndex('app_sessions_token_hash_unique').on(table.tokenHash),
+    index('app_sessions_player_idx').on(table.playerId, table.expiresAt),
+  ],
+)
+
+export const operatorSessions = pgTable(
+  'operator_sessions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    uniqueIndex('operator_sessions_token_hash_unique').on(table.tokenHash),
+    index('operator_sessions_expiry_idx').on(table.expiresAt),
+  ],
+)
+
+export const operatorAuditEvents = pgTable(
+  'operator_audit_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    operatorSessionId: uuid('operator_session_id').references(() => operatorSessions.id, {
+      onDelete: 'set null',
+    }),
+    action: text('action').notNull(),
+    targetPlayerId: uuid('target_player_id').references(() => players.id, {
+      onDelete: 'set null',
+    }),
+    targetTelegramIdentityId: uuid('target_telegram_identity_id').references(
+      () => telegramIdentities.id,
+      { onDelete: 'set null' },
+    ),
+    targetWalletIdentityId: uuid('target_wallet_identity_id').references(
+      () => walletIdentities.id,
+      {
+        onDelete: 'set null',
+      },
+    ),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index('operator_audit_events_created_idx').on(table.createdAt),
+    index('operator_audit_events_player_idx').on(table.targetPlayerId, table.createdAt),
+  ],
+)
+
 export const communityGameConfigs = pgTable(
   'community_game_configs',
   {
