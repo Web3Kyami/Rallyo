@@ -5,6 +5,8 @@ import { eq, sql } from 'drizzle-orm'
 
 import { createDatabase } from '../db/client'
 import * as schema from '../db/schema'
+import { DEFAULT_QUIZ_BANK } from '../content/default-quiz-bank'
+import { createMathQuestion } from '../core/content-preparation'
 
 const environment = parseEnvironment(process.env)
 if (!environment.DATABASE_URL) throw new Error('DATABASE_URL is required.')
@@ -116,6 +118,61 @@ try {
       .onConflictDoNothing({ target: schema.questions.fingerprint })
       .returning({ id: schema.questions.id })
     if (result.length > 0) inserted += 1
+  }
+  for (const item of DEFAULT_QUIZ_BANK) {
+    const fingerprint = createHash('sha256')
+      .update(`MCQ|${item.prompt.toLowerCase()}|${item.correctAnswer.toLowerCase()}`)
+      .digest('hex')
+    const result = await resources.db
+      .insert(schema.questions)
+      .values({
+        scope: 'GLOBAL',
+        source: 'DEFAULT',
+        mode: 'QUICK',
+        presentationType: 'MCQ',
+        category: item.category,
+        difficulty: item.difficulty,
+        prompt: item.prompt,
+        options: item.options.map((value) => ({ label: value, value })),
+        correctAnswer: item.correctAnswer,
+        acceptedAnswers: [item.correctAnswer],
+        hints: item.hints,
+        basePoints: item.difficulty === 'HARD' ? 30 : item.difficulty === 'MEDIUM' ? 20 : 15,
+        fingerprint,
+        status: 'APPROVED',
+      })
+      .onConflictDoNothing({ target: schema.questions.fingerprint })
+      .returning({ id: schema.questions.id })
+    if (result.length > 0) inserted += 1
+  }
+  for (const difficulty of ['EASY', 'MEDIUM', 'HARD'] as const) {
+    for (let seed = 1; seed <= 5; seed += 1) {
+      const item = createMathQuestion(difficulty, seed)
+      const fingerprint = createHash('sha256')
+        .update(`MATH|${item.question}|${item.answer}`)
+        .digest('hex')
+      const result = await resources.db
+        .insert(schema.questions)
+        .values({
+          scope: 'GLOBAL',
+          source: 'DEFAULT',
+          mode: 'FIRST_CORRECT',
+          presentationType: 'MATH',
+          category: item.category,
+          difficulty: item.difficulty,
+          prompt: item.question,
+          correctAnswer: item.answer,
+          acceptedAnswers: item.aliases,
+          hints: item.hints,
+          sourceRefs: item.sourceRefs,
+          basePoints: difficulty === 'HARD' ? 30 : difficulty === 'MEDIUM' ? 20 : 15,
+          fingerprint,
+          status: 'APPROVED',
+        })
+        .onConflictDoNothing({ target: schema.questions.fingerprint })
+        .returning({ id: schema.questions.id })
+      if (result.length > 0) inserted += 1
+    }
   }
   const [countRow] = await resources.db
     .select({ count: sql<number>`count(*)` })

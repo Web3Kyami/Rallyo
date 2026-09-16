@@ -3,6 +3,9 @@ import type { WordLength } from './rules'
 export type GeneralWord = {
   readonly word: string
   readonly clue: string | null
+  readonly category?: string
+  readonly difficulty?: 'EASY' | 'MEDIUM' | 'HARD'
+  readonly aliases?: readonly string[]
 }
 
 const GENERAL_WORDS: Record<WordLength, readonly GeneralWord[]> = {
@@ -46,9 +49,10 @@ const GENERAL_WORDS: Record<WordLength, readonly GeneralWord[]> = {
     'test',
     'time',
     'word',
+    'zoom',
   ]
     .filter((word) => word.length === 4)
-    .map((word) => ({ word, clue: null })),
+    .map((word, index) => ({ word, clue: null, difficulty: difficultyForIndex(index) })),
   5: [
     'about',
     'after',
@@ -121,7 +125,7 @@ const GENERAL_WORDS: Record<WordLength, readonly GeneralWord[]> = {
     'write',
   ]
     .filter((word) => word.length === 5)
-    .map((word) => ({ word, clue: null })),
+    .map((word, index) => ({ word, clue: null, difficulty: difficultyForIndex(index) })),
   6: [
     'active',
     'answer',
@@ -161,7 +165,11 @@ const GENERAL_WORDS: Record<WordLength, readonly GeneralWord[]> = {
     'yellow',
   ]
     .filter((word) => word.length === 6)
-    .map((word) => ({ word, clue: null })),
+    .map((word, index) => ({ word, clue: null, difficulty: difficultyForIndex(index) })),
+}
+
+function difficultyForIndex(index: number): 'EASY' | 'MEDIUM' | 'HARD' {
+  return index % 7 === 0 ? 'HARD' : index % 3 === 0 ? 'EASY' : 'MEDIUM'
 }
 
 export function generalWordsForLength(wordLength: WordLength): readonly GeneralWord[] {

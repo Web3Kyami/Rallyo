@@ -22,6 +22,7 @@ export type TelegramHandlers = {
   readonly onScrambleHint: (context: Context) => Promise<void>
   readonly onMyChatMember: (context: Context) => Promise<void>
   readonly onGroupText: (context: Context) => Promise<void>
+  readonly onProofMessage: (context: Context) => Promise<void>
   readonly onAdminCallback: (context: Context) => Promise<void>
   readonly onPlayerCallback: (context: Context) => Promise<void>
 }
@@ -51,8 +52,9 @@ export function createRallyoBot(token: string, handlers: TelegramHandlers): Bot 
   bot.command('scramble_stop', handlers.onScrambleStop)
   bot.command('scramble_hint', handlers.onScrambleHint)
   bot.on('my_chat_member', handlers.onMyChatMember)
-  bot.callbackQuery(/^admin:/, handlers.onAdminCallback)
+  bot.callbackQuery(/^(?:admin|a):/, handlers.onAdminCallback)
   bot.callbackQuery(/^player:/, handlers.onPlayerCallback)
+  bot.on(['message:photo', 'message:document'], handlers.onProofMessage)
   bot.on('message:text', handlers.onGroupText)
 
   bot.catch((error) => {

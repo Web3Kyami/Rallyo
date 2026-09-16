@@ -1,6 +1,7 @@
 export type GeneralScrambleTerm = {
   readonly term: string
   readonly category: string
+  readonly difficulty?: 'EASY' | 'MEDIUM' | 'HARD'
 }
 
 // The general pool is intentionally small, safe, and versioned in source control.

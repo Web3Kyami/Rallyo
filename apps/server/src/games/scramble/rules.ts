@@ -1,9 +1,11 @@
 import { normalizeAnswer } from '@rallyo/core'
+import type { ResolvedDifficulty } from '../difficulty'
 
 export type ScrambleCandidate = {
   readonly term: string
   readonly category: string
   readonly sourceTermId?: string
+  readonly difficulty?: string
 }
 
 export type SelectedScramble = ScrambleCandidate & {
@@ -53,6 +55,7 @@ export function selectScrambleTerm(
   options: {
     readonly minLength?: number
     readonly maxLength?: number
+    readonly difficulty?: ResolvedDifficulty
     readonly random?: RandomSource
   } = {},
 ): SelectedScramble | null {
@@ -64,10 +67,31 @@ export function selectScrambleTerm(
   )
   if (usable.length === 0) return null
 
-  const fresh = usable.filter(
+  const difficultyCandidates = options.difficulty
+    ? usable.filter((candidate) => {
+        const value = (candidate.difficulty ?? 'AUTO').toUpperCase()
+        return value === 'AUTO' || value === options.difficulty
+      })
+    : usable
+  const scopedCandidates = difficultyCandidates.length > 0 ? difficultyCandidates : usable
+
+  const projectCandidates = scopedCandidates.filter((candidate) => candidate.sourceTermId)
+  const generalCandidates = scopedCandidates.filter((candidate) => !candidate.sourceTermId)
+  const preferred = projectCandidates.length > 0 ? projectCandidates : generalCandidates
+  const freshPreferred = preferred.filter(
     (candidate) => !recentNormalizedAnswers.has(normalizeAnswer(candidate.term)),
   )
-  const pool = fresh.length > 0 ? fresh : usable
+  const freshGeneral = generalCandidates.filter(
+    (candidate) => !recentNormalizedAnswers.has(normalizeAnswer(candidate.term)),
+  )
+  const pool =
+    freshPreferred.length > 0
+      ? freshPreferred
+      : projectCandidates.length > 0 && freshGeneral.length > 0
+        ? freshGeneral
+        : preferred.length > 0
+          ? preferred
+          : scopedCandidates
   const candidate = pool[randomIndex(random, pool.length)]
   if (!candidate) return null
 

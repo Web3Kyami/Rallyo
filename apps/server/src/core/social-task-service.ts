@@ -1,9 +1,16 @@
-import { and, asc, desc, eq, gt, gte, lt, lte } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, gte, lt, lte, or } from 'drizzle-orm'
 
 import type { RallyoDatabase } from '../db/client'
 import * as schema from '../db/schema'
 import { assertCommunityAdmin } from './community-authorization'
 import { awardScoreEvent } from './score-event-service'
+
+type SocialTaskType = (typeof schema.socialTaskType.enumValues)[number]
+type SocialTaskPlatform = (typeof schema.socialTaskPlatform.enumValues)[number]
+type SocialTaskAction = (typeof schema.socialTaskAction.enumValues)[number]
+type SocialProofType = (typeof schema.socialProofType.enumValues)[number]
+
+const MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024
 
 export class SocialTaskError extends Error {
   constructor(message: string) {
@@ -92,6 +99,17 @@ export class SocialTaskService {
         id: schema.socialTasks.id,
         communityId: schema.socialTasks.communityId,
         title: schema.socialTasks.title,
+        instructions: schema.socialTasks.instructions,
+        points: schema.socialTasks.points,
+        taskType: schema.socialTasks.taskType,
+        platform: schema.socialTasks.platform,
+        action: schema.socialTasks.action,
+        targetUrl: schema.socialTasks.targetUrl,
+        proofType: schema.socialTasks.proofType,
+        requiresHandle: schema.socialTasks.requiresHandle,
+        maxApprovedSubmissionsPerPlayerPerDay:
+          schema.socialTasks.maxApprovedSubmissionsPerPlayerPerDay,
+        completionCapPerPlayer: schema.socialTasks.completionCapPerPlayer,
         status: schema.socialTasks.status,
         startsAt: schema.socialTasks.startsAt,
         endsAt: schema.socialTasks.endsAt,
@@ -127,6 +145,8 @@ export class SocialTaskService {
         ],
         set: {
           taskId: input.taskId,
+          pendingUrl: null,
+          pendingHandle: null,
           expiresAt,
           updatedAt: input.now,
         },
@@ -135,6 +155,72 @@ export class SocialTaskService {
 
     if (!session) throw new SocialTaskError('The submission step could not be started.')
     return { session, task }
+  }
+
+  async dailySubmissionStatus(input: {
+    readonly taskId: string
+    readonly playerId: string
+    readonly now: Date
+  }) {
+    const [task] = await this.database
+      .select({
+        maxApprovedSubmissionsPerPlayerPerDay:
+          schema.socialTasks.maxApprovedSubmissionsPerPlayerPerDay,
+      })
+      .from(schema.socialTasks)
+      .where(eq(schema.socialTasks.id, input.taskId))
+      .limit(1)
+
+    if (!task) return { used: 0, limit: null, remaining: null }
+
+    const dayStart = new Date(input.now)
+    dayStart.setUTCHours(0, 0, 0, 0)
+    const rows = await this.database
+      .select({ id: schema.socialTaskSubmissions.id })
+      .from(schema.socialTaskSubmissions)
+      .where(
+        and(
+          eq(schema.socialTaskSubmissions.taskId, input.taskId),
+          eq(schema.socialTaskSubmissions.playerId, input.playerId),
+          gte(schema.socialTaskSubmissions.createdAt, dayStart),
+          lte(schema.socialTaskSubmissions.createdAt, input.now),
+          or(
+            eq(schema.socialTaskSubmissions.status, 'APPROVED'),
+            eq(schema.socialTaskSubmissions.status, 'PENDING'),
+          ),
+        ),
+      )
+    const limit = task.maxApprovedSubmissionsPerPlayerPerDay
+    return {
+      used: rows.length,
+      limit,
+      remaining: limit === null ? null : Math.max(0, limit - rows.length),
+    }
+  }
+
+  async saveSubmissionUrl(input: {
+    readonly telegramUserId: bigint
+    readonly communityId: string
+    readonly url: string
+    readonly now: Date
+  }) {
+    const url = input.url.trim()
+    if (!/^https?:\/\//iu.test(url) || url.length > 2_000) {
+      throw new SocialTaskError('Send a valid http:// or https:// proof URL.')
+    }
+    const [session] = await this.database
+      .update(schema.socialTaskSubmissionSessions)
+      .set({ pendingUrl: url, updatedAt: input.now })
+      .where(
+        and(
+          eq(schema.socialTaskSubmissionSessions.telegramUserId, input.telegramUserId),
+          eq(schema.socialTaskSubmissionSessions.communityId, input.communityId),
+          gt(schema.socialTaskSubmissionSessions.expiresAt, input.now),
+        ),
+      )
+      .returning()
+    if (!session) throw new SocialTaskError('Choose a task first, then send its proof.')
+    return session
   }
 
   async activeSubmissionSession(input: {
@@ -179,7 +265,15 @@ export class SocialTaskService {
     readonly points: number
     readonly startsAt: Date
     readonly endsAt: Date
+    readonly taskType?: SocialTaskType
+    readonly platform?: SocialTaskPlatform
+    readonly action?: SocialTaskAction
+    readonly targetUrl?: string
+    readonly proofType?: SocialProofType
+    readonly requiresHandle?: boolean
     readonly maxSubmissionsPerPlayer?: number
+    readonly maxApprovedSubmissionsPerPlayerPerDay?: number
+    readonly completionCapPerPlayer?: number
     readonly cooldownDays?: number
     readonly createdByTelegramUserId: bigint
   }) {
@@ -189,11 +283,37 @@ export class SocialTaskService {
     if (input.endsAt <= input.startsAt) {
       throw new SocialTaskError('Social task end time must be after its start time.')
     }
+    const taskType = input.taskType ?? 'RECURRING'
+    const platform = input.platform ?? 'OTHER'
+    const action = input.action ?? 'OTHER'
+    const proofType = input.proofType ?? 'URL'
+    const targetUrl = input.targetUrl?.trim() || undefined
+    if (targetUrl && !/^https?:\/\//iu.test(targetUrl)) {
+      throw new SocialTaskError('Task target links must start with http:// or https://.')
+    }
+    if (taskType === 'CAMPAIGN' && action !== 'OTHER' && !targetUrl) {
+      throw new SocialTaskError('Campaign tasks with a specific action need a target link.')
+    }
     if (
       input.maxSubmissionsPerPlayer !== undefined &&
       (!Number.isSafeInteger(input.maxSubmissionsPerPlayer) || input.maxSubmissionsPerPlayer <= 0)
     ) {
       throw new SocialTaskError('Social task submission caps must be positive.')
+    }
+    if (
+      input.maxApprovedSubmissionsPerPlayerPerDay !== undefined &&
+      (!Number.isSafeInteger(input.maxApprovedSubmissionsPerPlayerPerDay) ||
+        input.maxApprovedSubmissionsPerPlayerPerDay <= 0)
+    ) {
+      throw new SocialTaskError('Daily approved submission limits must be positive.')
+    }
+    const completionCapPerPlayer =
+      input.completionCapPerPlayer ?? (taskType === 'CAMPAIGN' ? 1 : undefined)
+    if (
+      completionCapPerPlayer !== undefined &&
+      (!Number.isSafeInteger(completionCapPerPlayer) || completionCapPerPlayer <= 0)
+    ) {
+      throw new SocialTaskError('Per-player completion limits must be positive.')
     }
     if (
       input.cooldownDays !== undefined &&
@@ -222,9 +342,19 @@ export class SocialTaskService {
         points: input.points,
         startsAt: input.startsAt,
         endsAt: input.endsAt,
+        taskType,
+        platform,
+        action,
+        ...(targetUrl ? { targetUrl } : {}),
+        proofType,
+        requiresHandle: input.requiresHandle ?? false,
         ...(input.maxSubmissionsPerPlayer === undefined
           ? {}
           : { maxSubmissionsPerPlayer: input.maxSubmissionsPerPlayer }),
+        ...(input.maxApprovedSubmissionsPerPlayerPerDay === undefined
+          ? {}
+          : { maxApprovedSubmissionsPerPlayerPerDay: input.maxApprovedSubmissionsPerPlayerPerDay }),
+        ...(completionCapPerPlayer === undefined ? {} : { completionCapPerPlayer }),
         ...(input.cooldownDays === undefined ? {} : { cooldownDays: input.cooldownDays }),
         createdByTelegramUserId: input.createdByTelegramUserId,
       })
@@ -237,15 +367,39 @@ export class SocialTaskService {
   async submit(input: {
     readonly taskId: string
     readonly playerId: string
-    readonly reference: string
+    readonly reference?: string
+    readonly url?: string
+    readonly proofType?: SocialProofType
+    readonly screenshotFileId?: string
+    readonly screenshotFileUniqueId?: string
+    readonly screenshotFileName?: string
+    readonly screenshotMimeType?: string
+    readonly screenshotFileSize?: number
+    readonly screenshotWidth?: number
+    readonly screenshotHeight?: number
+    readonly claimedHandle?: string
     readonly now: Date
   }) {
-    const reference = input.reference.trim()
-    if (reference.length === 0 || reference.length > 2_000) {
-      throw new SocialTaskError(
-        'A submission URL or reference from 1 to 2000 characters is required.',
-      )
+    const url = input.url?.trim() || input.reference?.trim() || undefined
+    if (url && url.length > 2_000) {
+      throw new SocialTaskError('Submission links must be 2000 characters or fewer.')
     }
+    if (input.screenshotFileSize !== undefined && input.screenshotFileSize > MAX_SCREENSHOT_BYTES) {
+      throw new SocialTaskError('Screenshot proof must be 10 MB or smaller.')
+    }
+    const suppliedProofType =
+      input.proofType ?? (input.screenshotFileId ? (url ? 'URL_SCREENSHOT' : 'SCREENSHOT') : 'URL')
+    if (suppliedProofType === 'URL' && !url) {
+      throw new SocialTaskError('This task requires a proof URL.')
+    }
+    if (suppliedProofType !== 'URL' && !input.screenshotFileId) {
+      throw new SocialTaskError('This task requires a Telegram screenshot or document.')
+    }
+    if (suppliedProofType === 'URL_SCREENSHOT' && !url) {
+      throw new SocialTaskError('This task requires both a proof URL and a screenshot.')
+    }
+    const screenshotKey = input.screenshotFileUniqueId ?? input.screenshotFileId
+    const reference = url ?? `telegram-file:${screenshotKey ?? 'proof'}`
 
     return this.database.transaction(async (tx) => {
       const [task] = await tx
@@ -260,6 +414,19 @@ export class SocialTaskService {
         input.now >= task.endsAt
       ) {
         throw new SocialTaskError('Social task is not accepting submissions.')
+      }
+
+      if (task.proofType !== suppliedProofType) {
+        throw new SocialTaskError(
+          task.proofType === 'URL'
+            ? 'This task requires a proof URL.'
+            : task.proofType === 'SCREENSHOT'
+              ? 'This task requires a screenshot or document proof.'
+              : 'This task requires both a proof URL and a screenshot.',
+        )
+      }
+      if (task.requiresHandle && !input.claimedHandle?.trim()) {
+        throw new SocialTaskError('This task also asks for the platform handle used.')
       }
 
       const existing = await tx
@@ -277,6 +444,50 @@ export class SocialTaskService {
         existing.length >= task.maxSubmissionsPerPlayer
       ) {
         throw new SocialTaskError('The player has reached the pending submission cap.')
+      }
+
+      const completed = await tx
+        .select({ id: schema.socialTaskSubmissions.id })
+        .from(schema.socialTaskSubmissions)
+        .where(
+          and(
+            eq(schema.socialTaskSubmissions.taskId, input.taskId),
+            eq(schema.socialTaskSubmissions.playerId, input.playerId),
+            or(
+              eq(schema.socialTaskSubmissions.status, 'APPROVED'),
+              eq(schema.socialTaskSubmissions.status, 'PENDING'),
+            ),
+          ),
+        )
+      if (
+        task.taskType === 'CAMPAIGN' &&
+        task.completionCapPerPlayer !== null &&
+        completed.length >= task.completionCapPerPlayer
+      ) {
+        throw new SocialTaskError('This campaign task has already reached its per-player limit.')
+      }
+
+      if (task.taskType === 'RECURRING' && task.maxApprovedSubmissionsPerPlayerPerDay !== null) {
+        const dayStart = new Date(input.now)
+        dayStart.setUTCHours(0, 0, 0, 0)
+        const daily = await tx
+          .select({ id: schema.socialTaskSubmissions.id })
+          .from(schema.socialTaskSubmissions)
+          .where(
+            and(
+              eq(schema.socialTaskSubmissions.taskId, input.taskId),
+              eq(schema.socialTaskSubmissions.playerId, input.playerId),
+              gte(schema.socialTaskSubmissions.createdAt, dayStart),
+              lte(schema.socialTaskSubmissions.createdAt, input.now),
+              or(
+                eq(schema.socialTaskSubmissions.status, 'APPROVED'),
+                eq(schema.socialTaskSubmissions.status, 'PENDING'),
+              ),
+            ),
+          )
+        if (daily.length >= task.maxApprovedSubmissionsPerPlayerPerDay) {
+          throw new SocialTaskError('The daily submission limit for this task has been reached.')
+        }
       }
 
       if (task.cooldownDays > 0) {
@@ -301,6 +512,26 @@ export class SocialTaskService {
           taskId: input.taskId,
           playerId: input.playerId,
           reference,
+          ...(url ? { url } : {}),
+          proofType: suppliedProofType,
+          ...(input.screenshotFileId ? { screenshotFileId: input.screenshotFileId } : {}),
+          ...(input.screenshotFileUniqueId
+            ? { screenshotFileUniqueId: input.screenshotFileUniqueId }
+            : {}),
+          ...(input.screenshotFileName ? { screenshotFileName: input.screenshotFileName } : {}),
+          ...(input.screenshotMimeType ? { screenshotMimeType: input.screenshotMimeType } : {}),
+          ...(input.screenshotFileSize !== undefined
+            ? { screenshotFileSize: input.screenshotFileSize }
+            : {}),
+          ...(input.screenshotWidth !== undefined
+            ? { screenshotWidth: input.screenshotWidth }
+            : {}),
+          ...(input.screenshotHeight !== undefined
+            ? { screenshotHeight: input.screenshotHeight }
+            : {}),
+          ...(input.claimedHandle?.trim() ? { claimedHandle: input.claimedHandle.trim() } : {}),
+          createdAt: input.now,
+          updatedAt: input.now,
         })
         .onConflictDoNothing({
           target: [

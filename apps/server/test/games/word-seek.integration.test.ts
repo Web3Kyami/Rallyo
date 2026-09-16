@@ -273,4 +273,48 @@ describeDatabase('Word Seek against PostgreSQL', { timeout: 30_000 }, () => {
     expect(session.sourceId).toBe(projectWord.id)
     expect(session.clue).toBe('A coordinated push.')
   })
+
+  it('prefers approved project vocabulary and only uses newly approved words in later rounds', async () => {
+    await enable(ids.communityOne, { source: 'GENERAL' })
+    const projectWord = await wordSeek.createProjectWord({
+      communityId: ids.communityOne,
+      word: 'rally',
+      clue: 'A coordinated push.',
+    })
+    await wordSeek.approveProjectWord(projectWord.id)
+
+    const first = await wordSeek.start({
+      communityId: ids.communityOne,
+      seasonId: ids.seasonOne,
+      startsAt: now,
+      now,
+    })
+    const newlyApproved = await wordSeek.createProjectWord({
+      communityId: ids.communityOne,
+      word: 'orbit',
+    })
+    await wordSeek.approveProjectWord(newlyApproved.id)
+    expect(first.targetWord).toBe('rally')
+    expect(first.sourceType).toBe('PROJECT')
+    await expect(
+      wordSeek.submitGuess({
+        communityId: ids.communityOne,
+        playerId: ids.playerOne,
+        telegramUpdateId: 91n,
+        telegramInputId: 'chat:7001:message:91',
+        rawGuess: 'orbit',
+        now,
+      }),
+    ).resolves.toMatchObject({ status: 'INVALID_WORD' })
+
+    await wordSeek.endSession({ communityId: ids.communityOne, sessionId: first.id, now })
+    const later = await wordSeek.start({
+      communityId: ids.communityOne,
+      seasonId: ids.seasonOne,
+      startsAt: new Date(now.getTime() + 1_000),
+      now: new Date(now.getTime() + 1_000),
+    })
+    expect(later.targetWord).toBe('orbit')
+    expect(later.sourceType).toBe('PROJECT')
+  })
 })

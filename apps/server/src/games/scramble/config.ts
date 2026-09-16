@@ -1,11 +1,13 @@
 import { z } from 'zod'
 
 import { CommunityGameConfigError } from '../../core/community-game-config-service'
+import { gameDifficultySchema } from '../difficulty'
 
 const sourceSchema = z.enum(['GENERAL', 'PROJECT_BRAIN'])
 
 const scrambleConfigSchema = z
   .object({
+    difficulty: gameDifficultySchema.default('AUTO'),
     source: sourceSchema.default('GENERAL'),
     points: z.number().int().min(1).max(1_000).default(10),
     timeoutSeconds: z.number().int().min(5).max(3_600).default(60),
@@ -76,6 +78,7 @@ export function parseScrambleConfig(input: unknown): ScrambleConfig {
 
   const value = input as Record<string, unknown>
   const rawSource = value.source ?? value.contentSource
+  const difficulty = value.difficulty ?? value.level
   const source =
     typeof rawSource === 'string' ? rawSource.toUpperCase().replaceAll('-', '_') : rawSource
   const maxHints = value.maxHints ?? value.hintCount
@@ -92,6 +95,7 @@ export function parseScrambleConfig(input: unknown): ScrambleConfig {
     return scrambleConfigSchema.parse({
       ...value,
       ...(normalizedSource === undefined ? {} : { source: normalizedSource }),
+      ...(difficulty === undefined ? {} : { difficulty }),
       ...(maxHints === undefined ? {} : { maxHints }),
       ...(value.hintTimingSeconds === undefined
         ? {

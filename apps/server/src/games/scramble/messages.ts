@@ -1,7 +1,7 @@
 import type { ScrambleRound } from './service'
 
 export function renderScrambleStart(round: ScrambleRound, now: Date = round.startsAt): string {
-  return `<b>🔀 SCRAMBLE</b>\n\n<b>${escapeHtml(round.category)}</b>\n<code>${escapeHtml(round.scrambledTerm)}</code>\n\n<i>Unscramble the term. First correct reply wins ${round.pointsRemaining} pts.\n${remainingSeconds(round, now)} sec · ${hintLine(round)}</i>`
+  return `<b>🔀 SCRAMBLE · ${escapeHtml(round.difficulty ?? 'MEDIUM')}</b>\n\n<b>${escapeHtml(round.category)}</b>\n<code>${escapeHtml(round.scrambledTerm)}</code>\n\n<i>Unscramble the term. First correct reply wins ⭐ ${round.pointsRemaining} pts.\n⏱ ${remainingSeconds(round, now)}s · ${hintLine(round)}</i>`
 }
 
 export function renderScrambleHint(input: {
@@ -9,7 +9,12 @@ export function renderScrambleHint(input: {
   readonly hintNumber: number
   readonly maxHints: number
   readonly pointsRemaining: number
+  readonly round?: ScrambleRound
+  readonly now?: Date
 }): string {
+  if (input.round) {
+    return `${renderScrambleStart(input.round, input.now ?? input.round.startsAt)}\n\n<b>💡 Hint ${input.hintNumber}/${input.maxHints}</b>\n<code>${escapeHtml(input.hint)}</code>\n\n<i>⭐ ${input.pointsRemaining} pts remain</i>`
+  }
   return `<b>💡 SCRAMBLE HINT ${input.hintNumber}/${input.maxHints}</b>\n\n<code>${escapeHtml(input.hint)}</code>\n\n<i>${input.pointsRemaining} pts remain</i>`
 }
 

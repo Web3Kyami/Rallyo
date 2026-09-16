@@ -20,6 +20,14 @@ export const communityStatus = pgEnum('community_status', ['ACTIVE', 'PAUSED', '
 export const questionScope = pgEnum('question_scope', ['GLOBAL', 'COMMUNITY'])
 export const questionSource = pgEnum('question_source', ['DEFAULT', 'PROJECT_AI', 'MANUAL'])
 export const questionMode = pgEnum('question_mode', ['QUICK', 'FIRST_CORRECT', 'CLUE'])
+export const questionPresentationType = pgEnum('question_presentation_type', [
+  'TEXT',
+  'MCQ',
+  'IMAGE_IDENTIFY',
+  'IMAGE_CLUE',
+  'MATH',
+  'PROGRESSIVE_CLUE',
+])
 export const questionStatus = pgEnum('question_status', ['DRAFT', 'APPROVED', 'ARCHIVED'])
 export const seasonStatus = pgEnum('season_status', ['DRAFT', 'ACTIVE', 'CLOSED'])
 export const quizStatus = pgEnum('quiz_status', [
@@ -66,6 +74,20 @@ export const scrambleRoundStatus = pgEnum('scramble_round_status', [
   'STOPPED',
 ])
 export const socialTaskStatus = pgEnum('social_task_status', ['ACTIVE', 'PAUSED', 'ARCHIVED'])
+export const socialTaskType = pgEnum('social_task_type', ['RECURRING', 'CAMPAIGN'])
+export const socialTaskPlatform = pgEnum('social_task_platform', [
+  'X',
+  'INSTAGRAM',
+  'TIKTOK',
+  'OTHER',
+])
+export const socialTaskAction = pgEnum('social_task_action', [
+  'POST',
+  'COMMENT_REPLY',
+  'SHARE_REPOST',
+  'OTHER',
+])
+export const socialProofType = pgEnum('social_proof_type', ['URL', 'SCREENSHOT', 'URL_SCREENSHOT'])
 export const socialTaskSubmissionStatus = pgEnum('social_task_submission_status', [
   'PENDING',
   'APPROVED',
@@ -258,6 +280,7 @@ export const questions = pgTable(
     communityId: uuid('community_id').references(() => communities.id, { onDelete: 'cascade' }),
     source: questionSource('source').notNull(),
     mode: questionMode('mode').notNull(),
+    presentationType: questionPresentationType('presentation_type').notNull().default('TEXT'),
     category: text('category').notNull(),
     difficulty: text('difficulty').notNull(),
     prompt: text('prompt').notNull(),
@@ -265,6 +288,14 @@ export const questions = pgTable(
     correctAnswer: text('correct_answer').notNull(),
     acceptedAnswers: jsonb('accepted_answers').$type<readonly string[]>().notNull(),
     clueData: jsonb('clue_data').$type<ClueData>(),
+    hints: jsonb('hints').$type<readonly string[]>(),
+    mediaType: text('media_type'),
+    mediaFileId: text('media_file_id'),
+    mediaAssetRef: text('media_asset_ref'),
+    mediaSource: text('media_source'),
+    mediaCredit: text('media_credit'),
+    mediaAlt: text('media_alt'),
+    mediaSpoiler: boolean('media_spoiler').notNull().default(false),
     explanation: text('explanation'),
     sourceRefs: jsonb('source_refs').$type<readonly string[]>(),
     basePoints: integer('base_points').notNull(),
@@ -281,6 +312,10 @@ export const questions = pgTable(
       table.mode,
     ),
     check('questions_base_points_positive', sql`${table.basePoints} > 0`),
+    check(
+      'questions_difficulty_valid',
+      sql`${table.difficulty} IN ('AUTO', 'EASY', 'MEDIUM', 'HARD', 'easy', 'medium', 'hard')`,
+    ),
     check(
       'questions_scope_community_consistency',
       sql`(${table.scope} = 'GLOBAL' AND ${table.communityId} IS NULL) OR (${table.scope} = 'COMMUNITY' AND ${table.communityId} IS NOT NULL)`,
@@ -299,12 +334,14 @@ export const seasons = pgTable(
     startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
     endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
     status: seasonStatus('status').notNull().default('DRAFT'),
+    winnerCount: integer('winner_count').notNull().default(3),
     rewardPoolLuna: bigint('reward_pool_luna', { mode: 'bigint' }),
     createdAt: createdAt(),
   },
   (table) => [
     index('seasons_community_status_idx').on(table.communityId, table.status),
     check('seasons_end_after_start', sql`${table.endsAt} > ${table.startsAt}`),
+    check('seasons_winner_count_positive', sql`${table.winnerCount} > 0`),
   ],
 )
 
@@ -373,6 +410,7 @@ export const rounds = pgTable(
     clueNumberPresented: integer('clue_number_presented').notNull().default(1),
     presentation: text('presentation'),
     projectQuizConfig: jsonb('project_quiz_config').$type<CapabilityConfig>(),
+    difficulty: text('difficulty').notNull().default('MEDIUM'),
     scoredAt: timestamp('scored_at', { withTimezone: true }),
     telegramMessageId: bigint('telegram_message_id', { mode: 'bigint' }),
     version: integer('version').notNull().default(0),
@@ -391,6 +429,7 @@ export const rounds = pgTable(
       sql`${table.presentation} IS NULL OR ${table.presentation} IN ('typed', 'multiple_choice')`,
     ),
     check('rounds_version_nonnegative', sql`${table.version} >= 0`),
+    check('rounds_difficulty_valid', sql`${table.difficulty} IN ('EASY', 'MEDIUM', 'HARD')`),
   ],
 )
 
@@ -458,6 +497,7 @@ export const scrambleRounds = pgTable(
     normalizedAnswer: text('normalized_answer').notNull(),
     scrambledTerm: text('scrambled_term').notNull(),
     category: text('category').notNull(),
+    difficulty: text('difficulty').notNull().default('MEDIUM'),
     status: scrambleRoundStatus('status').notNull().default('LIVE'),
     startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
     locksAt: timestamp('locks_at', { withTimezone: true }).notNull(),
@@ -490,6 +530,10 @@ export const scrambleRounds = pgTable(
     check('scramble_rounds_hint_count_nonnegative', sql`${table.hintCount} >= 0`),
     check('scramble_rounds_hint_count_bounded', sql`${table.hintCount} <= ${table.maxHints}`),
     check('scramble_rounds_lock_after_start', sql`${table.locksAt} > ${table.startsAt}`),
+    check(
+      'scramble_rounds_difficulty_valid',
+      sql`${table.difficulty} IN ('EASY', 'MEDIUM', 'HARD')`,
+    ),
   ],
 )
 
@@ -531,7 +575,15 @@ export const socialTasks = pgTable(
     points: integer('points').notNull(),
     startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
     endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
+    taskType: socialTaskType('task_type').notNull().default('RECURRING'),
+    platform: socialTaskPlatform('platform').notNull().default('OTHER'),
+    action: socialTaskAction('action').notNull().default('OTHER'),
+    targetUrl: text('target_url'),
+    proofType: socialProofType('proof_type').notNull().default('URL'),
+    requiresHandle: boolean('requires_handle').notNull().default(false),
     maxSubmissionsPerPlayer: integer('max_submissions_per_player'),
+    maxApprovedSubmissionsPerPlayerPerDay: integer('max_approved_submissions_per_player_per_day'),
+    completionCapPerPlayer: integer('completion_cap_per_player'),
     cooldownDays: integer('cooldown_days').notNull().default(0),
     status: socialTaskStatus('status').notNull().default('ACTIVE'),
     createdByTelegramUserId: bigint('created_by_telegram_user_id', { mode: 'bigint' }).notNull(),
@@ -551,6 +603,14 @@ export const socialTasks = pgTable(
       'social_tasks_submission_cap_positive',
       sql`${table.maxSubmissionsPerPlayer} IS NULL OR ${table.maxSubmissionsPerPlayer} > 0`,
     ),
+    check(
+      'social_tasks_daily_approved_cap_positive',
+      sql`${table.maxApprovedSubmissionsPerPlayerPerDay} IS NULL OR ${table.maxApprovedSubmissionsPerPlayerPerDay} > 0`,
+    ),
+    check(
+      'social_tasks_completion_cap_positive',
+      sql`${table.completionCapPerPlayer} IS NULL OR ${table.completionCapPerPlayer} > 0`,
+    ),
     check('social_tasks_cooldown_nonnegative', sql`${table.cooldownDays} >= 0`),
   ],
 )
@@ -566,6 +626,16 @@ export const socialTaskSubmissions = pgTable(
       .notNull()
       .references(() => players.id, { onDelete: 'cascade' }),
     reference: text('reference').notNull(),
+    url: text('url'),
+    proofType: socialProofType('proof_type').notNull().default('URL'),
+    screenshotFileId: text('screenshot_file_id'),
+    screenshotFileUniqueId: text('screenshot_file_unique_id'),
+    screenshotFileName: text('screenshot_file_name'),
+    screenshotMimeType: text('screenshot_mime_type'),
+    screenshotFileSize: integer('screenshot_file_size'),
+    screenshotWidth: integer('screenshot_width'),
+    screenshotHeight: integer('screenshot_height'),
+    claimedHandle: text('claimed_handle'),
     status: socialTaskSubmissionStatus('status').notNull().default('PENDING'),
     reviewedByTelegramUserId: bigint('reviewed_by_telegram_user_id', { mode: 'bigint' }),
     reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
@@ -594,6 +664,8 @@ export const socialTaskSubmissionSessions = pgTable(
     taskId: uuid('task_id')
       .notNull()
       .references(() => socialTasks.id, { onDelete: 'cascade' }),
+    pendingUrl: text('pending_url'),
+    pendingHandle: text('pending_handle'),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     createdAt: createdAt(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -797,6 +869,9 @@ export const wordSeekWords = pgTable(
     word: text('word').notNull(),
     wordLength: integer('word_length').notNull(),
     clue: text('clue'),
+    category: text('category').notNull().default('Vocabulary'),
+    difficulty: text('difficulty').notNull().default('AUTO'),
+    aliases: jsonb('aliases').$type<readonly string[]>().notNull().default([]),
     sourceRef: text('source_ref'),
     status: wordSeekWordStatus('status').notNull().default('DRAFT'),
     createdAt: createdAt(),
@@ -813,6 +888,10 @@ export const wordSeekWords = pgTable(
       'word_seek_words_length_valid',
       sql`${table.wordLength} >= 4 AND ${table.wordLength} <= 6`,
     ),
+    check(
+      'word_seek_words_difficulty_valid',
+      sql`${table.difficulty} IN ('AUTO', 'EASY', 'MEDIUM', 'HARD')`,
+    ),
   ],
 )
 
@@ -828,9 +907,11 @@ export const wordSeekSessions = pgTable(
       .references(() => seasons.id, { onDelete: 'restrict' }),
     targetWord: text('target_word').notNull(),
     wordLength: integer('word_length').notNull(),
+    difficulty: text('difficulty').notNull().default('MEDIUM'),
     sourceType: wordSeekSourceType('source_type').notNull(),
     sourceId: uuid('source_id').references(() => wordSeekWords.id, { onDelete: 'set null' }),
     clue: text('clue'),
+    acceptedAnswers: jsonb('accepted_answers').$type<readonly string[]>().notNull().default([]),
     points: integer('points').notNull(),
     maxGuesses: integer('max_guesses').notNull(),
     startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
@@ -854,6 +935,10 @@ export const wordSeekSessions = pgTable(
     check('word_seek_sessions_points_positive', sql`${table.points} > 0`),
     check('word_seek_sessions_max_guesses_positive', sql`${table.maxGuesses} > 0`),
     check('word_seek_sessions_end_after_start', sql`${table.endsAt} > ${table.startsAt}`),
+    check(
+      'word_seek_sessions_difficulty_valid',
+      sql`${table.difficulty} IN ('EASY', 'MEDIUM', 'HARD')`,
+    ),
   ],
 )
 

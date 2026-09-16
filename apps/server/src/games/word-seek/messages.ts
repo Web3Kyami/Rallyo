@@ -5,19 +5,26 @@ export type WordSeekStartMessageInput = {
   readonly timeoutSeconds: number
   readonly maxGuesses: number
   readonly clue: string | null
+  readonly difficulty?: string
 }
 
 export function renderWordSeekStart(input: WordSeekStartMessageInput): string {
   const clue = input.clue ? `\n\n💡 <b>Clue</b>\n${escapeHtml(input.clue)}` : ''
-  return `<b>🔎 WORD SEEK</b>\n\n<b>${escapeHtml(input.communityTitle)}</b>\nFind the hidden ${input.wordLength}-letter word. The first valid solver wins.${clue}\n\n🟩 exact position\n🟨 right letter, wrong position\n🟥 not in the word\n\n<i>${input.maxGuesses} guesses · ${input.timeoutSeconds} sec · +${input.points} pts</i>`
+  return `<b>🔎 WORD SEEK · ${escapeHtml(input.difficulty ?? 'MEDIUM')}</b>\n\n<b>${escapeHtml(input.communityTitle)}</b>\nFind the hidden ${input.wordLength}-letter word. The first valid solver wins.${clue}\n\n🟩 exact position\n🟨 right letter, wrong position\n🟥 not in the word\n\n<i>${input.maxGuesses} guesses · ⏱ ${input.timeoutSeconds}s · ⭐ +${input.points} pts</i>`
 }
 
 export function renderWordSeekFeedback(input: {
   readonly feedback: string
   readonly guessesUsed: number
   readonly maxGuesses: number
+  readonly wordLength?: number
+  readonly difficulty?: string
 }): string {
-  return `<b>🔎 WORD SEEK · ${input.guessesUsed}/${input.maxGuesses}</b>\n\n${escapeHtml(input.feedback)}`
+  const detail = input.wordLength
+    ? `\n\nFind the ${input.wordLength}-letter word. Send another guess.`
+    : ''
+  const difficulty = input.difficulty ? ` · ${escapeHtml(input.difficulty)}` : ''
+  return `<b>🔎 WORD SEEK${difficulty} · ${input.guessesUsed}/${input.maxGuesses}</b>${detail}\n\n${escapeHtml(input.feedback)}`
 }
 
 export function renderWordSeekWinner(input: {

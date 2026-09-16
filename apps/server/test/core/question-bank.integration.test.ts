@@ -130,4 +130,44 @@ describeDatabase('QuestionBankService against PostgreSQL', () => {
     ).rejects.toThrow('Clue Round requires three clues.')
     expect(await db.select().from(schema.questions)).toHaveLength(0)
   })
+
+  it('validates prepared image content and reuses a cached Telegram file ID', async () => {
+    const source = await service.ingestSource({
+      communityId,
+      type: 'MARKDOWN',
+      title: 'Image references',
+      rawText: 'The project logo and visual identity are approved game content references.',
+    })
+    const [draft] = await service.saveGeneratedDraftPack({
+      communityId,
+      sourceId: source.source.id,
+      questions: [
+        {
+          mode: 'FIRST_CORRECT',
+          presentationType: 'IMAGE_IDENTIFY',
+          prompt: 'Which project symbol is shown?',
+          correctAnswer: 'Rallyo',
+          acceptedAnswers: ['Rallyo', 'Rallyo game'],
+          category: 'Project imagery',
+          difficulty: 'medium',
+          media: {
+            type: 'photo',
+            assetRef: 'project/logo-v1',
+            source: 'Project brand pack',
+            credit: 'Rallyo project',
+            alt: 'Rallyo project mark',
+            spoiler: true,
+          },
+          sourceRefs: [source.source.id],
+        },
+      ],
+    })
+    expect(draft?.presentationType).toBe('IMAGE_IDENTIFY')
+    const cached = await service.cacheTelegramMedia({
+      questionId: draft!.id,
+      fileId: 'cached-telegram-file-id',
+    })
+    expect(cached.mediaFileId).toBe('cached-telegram-file-id')
+    expect(cached.mediaSpoiler).toBe(true)
+  })
 })

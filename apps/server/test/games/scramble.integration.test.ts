@@ -281,4 +281,38 @@ describeDatabase('Scramble against PostgreSQL', () => {
     ).toBeNull()
     expect(await db.select().from(schema.walletIdentities)).toHaveLength(0)
   })
+
+  it('prefers approved project vocabulary while retaining the general fallback', async () => {
+    await configurations.set({
+      communityId: ids.communityOne,
+      gameKey: 'scramble',
+      enabled: true,
+      config: {
+        source: 'GENERAL',
+        points: 9,
+        timeoutSeconds: 30,
+        hintsEnabled: false,
+        maxHints: 0,
+        hintTimingSeconds: [],
+        pointReductions: [],
+        noRepeatRounds: 0,
+      },
+    })
+    await db.insert(schema.wordSeekWords).values({
+      communityId: ids.communityOne,
+      word: 'rallyo',
+      wordLength: 6,
+      status: 'APPROVED',
+    })
+
+    const round = await scramble.startRound({
+      communityId: ids.communityOne,
+      seasonId: ids.seasonOne,
+      now,
+      random: () => 0,
+    })
+    expect(round.source).toBe('PROJECT_BRAIN')
+    expect(round.term).toBe('rallyo')
+    expect(round.category).toBe('Project vocabulary')
+  })
 })

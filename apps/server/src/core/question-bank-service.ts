@@ -1,22 +1,34 @@
 import { createHash } from 'node:crypto'
 
+import { normalizeAnswer } from '@rallyo/core'
 import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 
 import type { RallyoDatabase } from '../db/client'
 import * as schema from '../db/schema'
+import { contentPresentationSchema, preparedMediaSchema } from './content-preparation'
+import { gameDifficultySchema } from '../games/difficulty'
 
 const optionSchema = z.object({ label: z.string().trim().min(1), value: z.string().trim().min(1) })
+const contentDifficultySchema = z
+  .preprocess(
+    (value) => (typeof value === 'string' ? value.trim().toUpperCase() : value),
+    gameDifficultySchema,
+  )
+  .default('AUTO')
 const generatedQuestionSchema = z
   .object({
     mode: z.enum(['QUICK', 'FIRST_CORRECT', 'CLUE']),
+    presentationType: contentPresentationSchema.default('TEXT'),
     prompt: z.string().trim().min(12),
     correctAnswer: z.string().trim().min(1),
     acceptedAnswers: z.array(z.string().trim().min(1)).min(1),
     options: z.array(optionSchema).min(2).optional(),
     clueData: z.object({ clues: z.array(z.string().trim().min(3)).length(3) }).optional(),
+    hints: z.array(z.string().trim().min(1)).max(3).default([]),
+    media: preparedMediaSchema.optional(),
     category: z.string().trim().min(1),
-    difficulty: z.enum(['easy', 'medium', 'hard']),
+    difficulty: contentDifficultySchema,
     explanation: z.string().trim().min(1).optional(),
     sourceRefs: z.array(z.string().trim().min(1)).min(1),
     basePoints: z.number().int().positive().optional(),
@@ -29,7 +41,11 @@ const generatedQuestionSchema = z
           path: ['options'],
           message: 'Quick Quiz requires options.',
         })
-      } else if (!question.options.some((option) => option.value === question.correctAnswer)) {
+      } else if (
+        !question.options.some(
+          (option) => normalizeAnswer(option.value) === normalizeAnswer(question.correctAnswer),
+        )
+      ) {
         context.addIssue({
           code: 'custom',
           path: ['correctAnswer'],
@@ -42,6 +58,17 @@ const generatedQuestionSchema = z
         code: 'custom',
         path: ['clueData'],
         message: 'Clue Round requires three clues.',
+      })
+    }
+    if (
+      (question.presentationType === 'IMAGE_IDENTIFY' ||
+        question.presentationType === 'IMAGE_CLUE') &&
+      !question.media
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['media'],
+        message: 'Image content needs prepared media metadata.',
       })
     }
   })
@@ -97,15 +124,7 @@ export class QuestionBankService {
   }
 
   validateGeneratedPack(input: unknown): GeneratedQuestion[] {
-    if (!Array.isArray(input))
-      throw new QuestionBankValidationError('Generated pack must be an array.')
-    const parsed = z.array(generatedQuestionSchema).safeParse(input)
-    if (!parsed.success) {
-      throw new QuestionBankValidationError(
-        parsed.error.issues.map((issue) => issue.message).join(' '),
-      )
-    }
-    return parsed.data
+    return validateGeneratedQuestionPack(input)
   }
 
   async saveGeneratedDraftPack(input: {
@@ -138,6 +157,19 @@ export class QuestionBankService {
             correctAnswer: question.correctAnswer,
             acceptedAnswers: uniqueStrings([question.correctAnswer, ...question.acceptedAnswers]),
             clueData: question.clueData,
+            presentationType: question.presentationType,
+            hints: question.hints,
+            ...(question.media
+              ? {
+                  mediaType: question.media.type,
+                  ...(question.media.fileId ? { mediaFileId: question.media.fileId } : {}),
+                  ...(question.media.assetRef ? { mediaAssetRef: question.media.assetRef } : {}),
+                  ...(question.media.source ? { mediaSource: question.media.source } : {}),
+                  ...(question.media.credit ? { mediaCredit: question.media.credit } : {}),
+                  ...(question.media.alt ? { mediaAlt: question.media.alt } : {}),
+                  mediaSpoiler: question.media.spoiler,
+                }
+              : {}),
             explanation: question.explanation,
             sourceRefs: question.sourceRefs,
             basePoints: question.basePoints ?? defaultPoints(question.mode),
@@ -161,6 +193,35 @@ export class QuestionBankService {
     if (!question) throw new QuestionBankValidationError('Only an existing draft can be approved.')
     return question
   }
+
+  async cacheTelegramMedia(input: {
+    readonly questionId: string
+    readonly fileId: string
+    readonly mediaType?: string
+  }) {
+    const fileId = input.fileId.trim()
+    if (!fileId) throw new QuestionBankValidationError('Telegram media file ID is required.')
+    const [question] = await this.database
+      .update(schema.questions)
+      .set({ mediaFileId: fileId, mediaType: input.mediaType?.trim() || 'photo' })
+      .where(eq(schema.questions.id, input.questionId))
+      .returning()
+    if (!question) throw new QuestionBankValidationError('Question could not be updated.')
+    return question
+  }
+}
+
+export function validateGeneratedQuestionPack(input: unknown): GeneratedQuestion[] {
+  if (!Array.isArray(input)) {
+    throw new QuestionBankValidationError('Generated pack must be an array.')
+  }
+  const parsed = z.array(generatedQuestionSchema).safeParse(input)
+  if (!parsed.success) {
+    throw new QuestionBankValidationError(
+      parsed.error.issues.map((issue) => issue.message).join(' '),
+    )
+  }
+  return parsed.data
 }
 
 function sha256(value: string): string {

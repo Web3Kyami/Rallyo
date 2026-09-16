@@ -4,6 +4,7 @@ import { z } from 'zod'
 import type { RallyoDatabase } from '../db/client'
 import * as schema from '../db/schema'
 import { parseScrambleConfig } from '../games/scramble/config'
+import { gameDifficultySchema } from '../games/difficulty'
 
 export const GAME_KEYS = ['project_quiz', 'word_seek', 'scramble'] as const
 export type GameKey = (typeof GAME_KEYS)[number]
@@ -24,6 +25,8 @@ export const projectQuizContentSourceSchema = z.enum([
 export const projectQuizConfigSchema = z
   .object({
     presentation: projectQuizPresentationSchema.default('typed'),
+    difficulty: gameDifficultySchema.default('AUTO'),
+    mediaRoundsEnabled: z.boolean().default(true),
     hintsEnabled: z.boolean().default(false),
     hintTimingSeconds: z.array(z.number().int().min(1).max(3_600)).max(2).default([20, 40]),
     startingPoints: z.number().int().min(1).max(1_000).default(20),
@@ -78,6 +81,7 @@ export function parseProjectQuizConfig(input: unknown): ProjectQuizConfig {
         ? [hints]
         : undefined)
   const contentSource = value.contentSource ?? value.sourcePolicy
+  const difficulty = value.difficulty ?? value.level
   const normalizedContentSource =
     contentSource === 'APPROVED' || contentSource === 'ANY'
       ? 'ANY_APPROVED'
@@ -112,6 +116,7 @@ export function parseProjectQuizConfig(input: unknown): ProjectQuizConfig {
           : { presentation }),
     ...(hintTimingSeconds === undefined ? {} : { hintTimingSeconds }),
     ...(normalizedContentSource === undefined ? {} : { contentSource: normalizedContentSource }),
+    ...(difficulty === undefined ? {} : { difficulty }),
   })
 
   if (!parsed.success) {

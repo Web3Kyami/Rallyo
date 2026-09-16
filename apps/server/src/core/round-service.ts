@@ -12,6 +12,7 @@ import {
 } from './community-game-config-service'
 import { awardScoreEvent } from './score-event-service'
 import type { CommunityGameConfigService } from './community-game-config-service'
+import { quizDifficultyPreset, resolveGameDifficulty } from '../games/difficulty'
 
 type Database = NodePgDatabase<typeof schema>
 type Transaction = NodePgTransaction<typeof schema, ExtractTablesWithRelations<typeof schema>>
@@ -56,15 +57,37 @@ export class RoundService {
     readonly startsAt: Date
     readonly locksAt?: Date
     readonly now: Date
+    readonly random?: () => number
   }) {
     const projectQuizConfiguration = this.gameConfigurations
       ? await this.gameConfigurations.getProjectQuizConfig(input.communityId)
       : { row: null, configured: false, config: DEFAULT_PROJECT_QUIZ_CONFIG }
+    const difficulty = resolveGameDifficulty(
+      projectQuizConfiguration.config.difficulty,
+      input.random,
+    )
+    const rawConfig = projectQuizConfiguration.row?.config ?? {}
+    const preset = quizDifficultyPreset(difficulty)
+    const configuredTimeout = rawConfig.answerTimeoutSeconds
+    const answerTimeoutSeconds =
+      typeof configuredTimeout === 'number' ? configuredTimeout : preset.answerTimeoutSeconds
+    const effectiveProjectQuizConfig: ProjectQuizConfig = {
+      ...projectQuizConfiguration.config,
+      difficulty,
+      answerTimeoutSeconds,
+      hintsEnabled:
+        typeof rawConfig.hintsEnabled === 'boolean'
+          ? projectQuizConfiguration.config.hintsEnabled
+          : preset.hintsEnabled,
+      hintTimingSeconds: Array.isArray(rawConfig.hintTimingSeconds)
+        ? projectQuizConfiguration.config.hintTimingSeconds
+        : [...preset.hintTimingSeconds],
+      pointReductions: Array.isArray(rawConfig.pointReductions)
+        ? projectQuizConfiguration.config.pointReductions
+        : [...preset.pointReductions],
+    }
     const locksAt =
-      input.locksAt ??
-      new Date(
-        input.startsAt.getTime() + projectQuizConfiguration.config.answerTimeoutSeconds * 1_000,
-      )
+      input.locksAt ?? new Date(input.startsAt.getTime() + answerTimeoutSeconds * 1_000)
 
     if (this.gameConfigurations) {
       await this.gameConfigurations.requireEnabled(input.communityId, 'project_quiz')
@@ -133,6 +156,8 @@ export class RoundService {
       const [questionRules] = await tx
         .select({
           mode: schema.questions.mode,
+          presentationType: schema.questions.presentationType,
+          mediaFileId: schema.questions.mediaFileId,
           basePoints: schema.questions.basePoints,
           options: schema.questions.options,
           clueData: schema.questions.clueData,
@@ -146,13 +171,27 @@ export class RoundService {
 
       const roundRules = resolveRoundRules(
         questionRules,
-        projectQuizConfiguration.config,
+        effectiveProjectQuizConfig,
         projectQuizConfiguration.configured,
         this.gameConfigurations !== undefined,
       )
 
       if (roundRules.presentation === 'multiple_choice' && !questionRules.options?.length) {
         throw new RoundStartError('Multiple-choice Project Quiz questions need answer options.')
+      }
+      if (
+        (questionRules.presentationType === 'IMAGE_IDENTIFY' ||
+          questionRules.presentationType === 'IMAGE_CLUE') &&
+        !projectQuizConfiguration.config.mediaRoundsEnabled
+      ) {
+        throw new RoundStartError('Image rounds are turned off for this community.')
+      }
+      if (
+        (questionRules.presentationType === 'IMAGE_IDENTIFY' ||
+          questionRules.presentationType === 'IMAGE_CLUE') &&
+        !questionRules.mediaFileId
+      ) {
+        throw new RoundStartError('This image round is waiting for prepared Telegram media.')
       }
 
       const [existingRound] = await tx
@@ -188,6 +227,7 @@ export class RoundService {
                 projectQuizConfig: roundRules.config,
               }
             : {}),
+          difficulty,
         })
         .returning()
 
@@ -390,6 +430,7 @@ export class RoundService {
         locksAt: schema.rounds.locksAt,
         presentation: schema.rounds.presentation,
         projectQuizConfig: schema.rounds.projectQuizConfig,
+        difficulty: schema.rounds.difficulty,
         telegramMessageId: schema.rounds.telegramMessageId,
         mode: schema.questions.mode,
         prompt: schema.questions.prompt,
@@ -397,6 +438,15 @@ export class RoundService {
         correctAnswer: schema.questions.correctAnswer,
         acceptedAnswers: schema.questions.acceptedAnswers,
         clueData: schema.questions.clueData,
+        presentationType: schema.questions.presentationType,
+        hints: schema.questions.hints,
+        mediaType: schema.questions.mediaType,
+        mediaFileId: schema.questions.mediaFileId,
+        mediaAssetRef: schema.questions.mediaAssetRef,
+        mediaSource: schema.questions.mediaSource,
+        mediaCredit: schema.questions.mediaCredit,
+        mediaAlt: schema.questions.mediaAlt,
+        mediaSpoiler: schema.questions.mediaSpoiler,
         basePoints: schema.questions.basePoints,
       })
       .from(schema.rounds)
@@ -431,6 +481,7 @@ export class RoundService {
         locksAt: schema.rounds.locksAt,
         presentation: schema.rounds.presentation,
         projectQuizConfig: schema.rounds.projectQuizConfig,
+        difficulty: schema.rounds.difficulty,
         telegramMessageId: schema.rounds.telegramMessageId,
         mode: schema.questions.mode,
         prompt: schema.questions.prompt,
@@ -438,6 +489,15 @@ export class RoundService {
         correctAnswer: schema.questions.correctAnswer,
         acceptedAnswers: schema.questions.acceptedAnswers,
         clueData: schema.questions.clueData,
+        presentationType: schema.questions.presentationType,
+        hints: schema.questions.hints,
+        mediaType: schema.questions.mediaType,
+        mediaFileId: schema.questions.mediaFileId,
+        mediaAssetRef: schema.questions.mediaAssetRef,
+        mediaSource: schema.questions.mediaSource,
+        mediaCredit: schema.questions.mediaCredit,
+        mediaAlt: schema.questions.mediaAlt,
+        mediaSpoiler: schema.questions.mediaSpoiler,
         basePoints: schema.questions.basePoints,
       })
       .from(schema.rounds)
@@ -469,6 +529,7 @@ export class RoundService {
         locksAt: schema.rounds.locksAt,
         presentation: schema.rounds.presentation,
         projectQuizConfig: schema.rounds.projectQuizConfig,
+        difficulty: schema.rounds.difficulty,
         telegramMessageId: schema.rounds.telegramMessageId,
         clueNumberPresented: schema.rounds.clueNumberPresented,
         mode: schema.questions.mode,
@@ -477,6 +538,15 @@ export class RoundService {
         correctAnswer: schema.questions.correctAnswer,
         acceptedAnswers: schema.questions.acceptedAnswers,
         clueData: schema.questions.clueData,
+        presentationType: schema.questions.presentationType,
+        hints: schema.questions.hints,
+        mediaType: schema.questions.mediaType,
+        mediaFileId: schema.questions.mediaFileId,
+        mediaAssetRef: schema.questions.mediaAssetRef,
+        mediaSource: schema.questions.mediaSource,
+        mediaCredit: schema.questions.mediaCredit,
+        mediaAlt: schema.questions.mediaAlt,
+        mediaSpoiler: schema.questions.mediaSpoiler,
         basePoints: schema.questions.basePoints,
       })
       .from(schema.rounds)
@@ -621,6 +691,7 @@ function projectQuizSourceCondition(contentSource: ProjectQuizConfig['contentSou
 function resolveRoundRules(
   question: {
     readonly mode: (typeof schema.questionMode.enumValues)[number]
+    readonly presentationType: (typeof schema.questionPresentationType.enumValues)[number]
     readonly basePoints: number
   },
   config: ProjectQuizConfig,
@@ -631,7 +702,10 @@ function resolveRoundRules(
   readonly config?: ProjectQuizConfig
 } {
   if (configured) {
-    return { presentation: config.presentation, config }
+    return {
+      presentation: question.presentationType === 'MCQ' ? 'multiple_choice' : config.presentation,
+      config,
+    }
   }
 
   if (useProjectQuizDefault && question.mode === 'CLUE') {
@@ -648,7 +722,10 @@ function resolveRoundRules(
 
   if (useProjectQuizDefault) {
     return {
-      presentation: 'typed',
+      presentation:
+        question.presentationType === 'MCQ' || question.mode === 'QUICK'
+          ? 'multiple_choice'
+          : 'typed',
       config: { ...config, startingPoints: question.basePoints },
     }
   }

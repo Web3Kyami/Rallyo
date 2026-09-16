@@ -36,6 +36,50 @@ describe('Telegram round messages', () => {
     ])
   })
 
+  it('renders image identify rounds as one media-aware quiz anchor', () => {
+    const message = renderRoundMessage({
+      id: 'image-round',
+      mode: 'FIRST_CORRECT',
+      presentationType: 'IMAGE_IDENTIFY',
+      difficulty: 'HARD',
+      prompt: 'What project symbol is shown?',
+      options: null,
+      clueData: null,
+      basePoints: 30,
+      startsAt,
+      locksAt,
+      mediaType: 'photo',
+      mediaFileId: 'cached-file-id',
+      mediaSpoiler: true,
+    })
+
+    expect(message.media).toMatchObject({
+      type: 'photo',
+      media: 'cached-file-id',
+      hasSpoiler: true,
+    })
+    expect(message.caption).toContain('IMAGE')
+    expect(message.text).toContain('⏱ 60s')
+  })
+
+  it('renders maths as a normal typed Project Quiz round', () => {
+    const message = renderRoundMessage({
+      id: 'math-round',
+      mode: 'FIRST_CORRECT',
+      presentationType: 'MATH',
+      difficulty: 'MEDIUM',
+      prompt: '7 × 8 = ?',
+      options: null,
+      clueData: null,
+      basePoints: 20,
+      startsAt,
+      locksAt,
+    })
+
+    expect(message.text).toContain('➗ PROJECT QUIZ / RACE')
+    expect(message.text).toContain('Reply with your answer')
+  })
+
   it('reveals Clue Round clues by elapsed time', () => {
     const message = renderRoundMessage(
       {

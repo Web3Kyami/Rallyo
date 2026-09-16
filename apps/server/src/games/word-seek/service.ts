@@ -1,3 +1,4 @@
+import { matchesAcceptedAnswer } from '@rallyo/core'
 import { and, desc, eq, gt, gte, lte, sql } from 'drizzle-orm'
 import { randomInt } from 'node:crypto'
 import type { ExtractTablesWithRelations } from 'drizzle-orm'
@@ -12,6 +13,12 @@ import * as schema from '../../db/schema'
 import { generalWordSet, generalWordsForLength } from './dictionary'
 import { claimTelegramUpdate } from '../../db/telegram-updates'
 import {
+  gameDifficultySchema,
+  resolveGameDifficulty,
+  wordSeekDifficultyPreset,
+  type ResolvedDifficulty,
+} from '../difficulty'
+import {
   isValidWordShape,
   isWordLength,
   normalizeWord,
@@ -24,6 +31,7 @@ type Transaction = NodePgTransaction<typeof schema, ExtractTablesWithRelations<t
 type Executor = Database | Transaction
 
 const wordSeekConfigSchema = z.object({
+  difficulty: gameDifficultySchema.default('AUTO'),
   wordLength: z.union([z.literal(4), z.literal(5), z.literal(6)]).default(5),
   roundTimeoutSeconds: z.number().int().min(30).max(3_600).default(300),
   points: z.number().int().positive().max(100).default(30),
@@ -108,6 +116,9 @@ type WordSeekCandidate = {
   readonly word: string
   readonly clue: string | null
   readonly sourceId: string | null
+  readonly sourceType: 'GENERAL' | 'PROJECT'
+  readonly aliases: readonly string[]
+  readonly difficulty: string
 }
 
 export class WordSeekService {
@@ -134,14 +145,26 @@ export class WordSeekService {
   }) {
     await this.configurations.requireEnabled(input.communityId, 'word_seek')
     const storedConfig = await this.configurations.get(input.communityId, 'word_seek')
-    const config = this.parseConfig(storedConfig?.config ?? {})
+    const rawConfig = storedConfig?.config ?? {}
+    const config = this.parseConfig(rawConfig)
+    const difficulty = resolveGameDifficulty(
+      config.difficulty,
+      () => this.randomIndex(10_000) / 10_000,
+    )
+    const preset = wordSeekDifficultyPreset(difficulty)
+    const timeoutSeconds = configuredNumber(
+      rawConfig,
+      'roundTimeoutSeconds',
+      preset.roundTimeoutSeconds,
+    )
+    const maxGuesses = configuredNumber(rawConfig, 'maxGuesses', preset.maxGuesses)
 
     if (input.startsAt > input.now) {
       throw new WordSeekError('Word Seek cannot start in the future.')
     }
 
     const startsAt = input.startsAt
-    const endsAt = new Date(startsAt.getTime() + config.roundTimeoutSeconds * 1_000)
+    const endsAt = new Date(startsAt.getTime() + timeoutSeconds * 1_000)
 
     return this.database.transaction(async (tx) => {
       const [community] = await tx
@@ -183,7 +206,13 @@ export class WordSeekService {
         throw new WordSeekError('Season is not active for the requested Word Seek round.')
       }
 
-      const candidate = await this.chooseCandidate(tx, input.communityId, config, input.targetWord)
+      const candidate = await this.chooseCandidate(
+        tx,
+        input.communityId,
+        config,
+        input.targetWord,
+        difficulty,
+      )
       const [session] = await tx
         .insert(schema.wordSeekSessions)
         .values({
@@ -191,11 +220,15 @@ export class WordSeekService {
           seasonId: season.id,
           targetWord: candidate.word,
           wordLength: config.wordLength,
-          sourceType: config.source,
+          difficulty,
+          sourceType: candidate.sourceType,
           ...(candidate.sourceId ? { sourceId: candidate.sourceId } : {}),
-          ...(config.clue || candidate.clue ? { clue: config.clue ?? candidate.clue } : {}),
+          acceptedAnswers: candidate.aliases,
+          ...(preset.hintEnabled && (config.clue || candidate.clue)
+            ? { clue: config.clue ?? candidate.clue }
+            : {}),
           points: config.points,
-          maxGuesses: config.maxGuesses,
+          maxGuesses,
           startsAt,
           endsAt,
           activeKey: input.communityId,
@@ -231,6 +264,9 @@ export class WordSeekService {
     readonly communityId: string
     readonly word: string
     readonly clue?: string
+    readonly category?: string
+    readonly difficulty?: 'AUTO' | 'EASY' | 'MEDIUM' | 'HARD'
+    readonly aliases?: readonly string[]
     readonly sourceRef?: string
   }) {
     const normalizedWord = normalizeWord(input.word)
@@ -248,6 +284,9 @@ export class WordSeekService {
         word: normalizedWord,
         wordLength: normalizedWord.length,
         ...(input.clue ? { clue: input.clue.trim() } : {}),
+        ...(input.category ? { category: input.category.trim() } : {}),
+        ...(input.difficulty ? { difficulty: input.difficulty } : {}),
+        ...(input.aliases ? { aliases: input.aliases.map(normalizeWord).filter(Boolean) } : {}),
         ...(input.sourceRef ? { sourceRef: input.sourceRef.trim() } : {}),
       })
       .returning()
@@ -356,7 +395,10 @@ export class WordSeekService {
         .limit(1)
       if (existingGuess) return { status: 'DUPLICATE_GUESS', wordLength: session.wordLength }
 
-      const correct = normalizedGuess === session.targetWord
+      const correct = matchesAcceptedAnswer(input.rawGuess, [
+        session.targetWord,
+        ...session.acceptedAnswers,
+      ])
       const feedback = wordSeekFeedback(normalizedGuess, session.targetWord)
       await tx.insert(schema.wordSeekGuesses).values({
         sessionId: session.id,
@@ -523,22 +565,29 @@ export class WordSeekService {
     communityId: string,
     config: WordSeekConfig,
     requestedWord?: string,
+    difficulty: ResolvedDifficulty = 'MEDIUM',
   ): Promise<WordSeekCandidate> {
-    const candidates =
-      config.source === 'GENERAL'
-        ? generalWordsForLength(config.wordLength).map((candidate) => ({
-            word: normalizeWord(candidate.word),
-            clue: candidate.clue,
-            sourceId: null,
-          }))
-        : await this.projectCandidates(database, communityId, config.wordLength)
+    const projectCandidates = await this.projectCandidates(database, communityId, config.wordLength)
+    const generalCandidates = generalWordsForLength(config.wordLength).map((candidate) => ({
+      word: normalizeWord(candidate.word),
+      clue: candidate.clue,
+      sourceId: null,
+      sourceType: 'GENERAL' as const,
+      aliases: (candidate.aliases ?? []).map(normalizeWord),
+      difficulty: candidate.difficulty ?? 'MEDIUM',
+    }))
+    const projectWords = new Set(projectCandidates.map((candidate) => candidate.word))
+    const candidates = [
+      ...projectCandidates,
+      ...generalCandidates.filter((candidate) => !projectWords.has(candidate.word)),
+    ]
+    const difficultyCandidates = candidates.filter((candidate) =>
+      matchesDifficulty(candidate.difficulty, difficulty),
+    )
+    const eligibleCandidates = difficultyCandidates.length > 0 ? difficultyCandidates : candidates
 
     if (candidates.length === 0) {
-      throw new WordSeekError(
-        config.source === 'PROJECT'
-          ? 'No approved project words are available for this length.'
-          : 'No general words are available for this length.',
-      )
+      throw new WordSeekError('No Word Seek words are available for this length yet.')
     }
 
     if (requestedWord) {
@@ -560,8 +609,28 @@ export class WordSeekService {
       .orderBy(desc(schema.wordSeekSessions.createdAt))
       .limit(20)
     const recentWords = new Set(recentSessions.map((session) => session.targetWord))
-    const freshCandidates = candidates.filter((candidate) => !recentWords.has(candidate.word))
-    const pool = freshCandidates.length > 0 ? freshCandidates : candidates
+    const scopedProjectCandidates = projectCandidates.filter((candidate) =>
+      matchesDifficulty(candidate.difficulty, difficulty),
+    )
+    const scopedGeneralCandidates = generalCandidates.filter((candidate) =>
+      matchesDifficulty(candidate.difficulty, difficulty),
+    )
+    const freshProjectCandidates = scopedProjectCandidates.filter(
+      (candidate) => !recentWords.has(candidate.word),
+    )
+    const freshGeneralCandidates = scopedGeneralCandidates.filter(
+      (candidate) => !recentWords.has(candidate.word),
+    )
+    const pool =
+      freshProjectCandidates.length > 0
+        ? freshProjectCandidates
+        : scopedProjectCandidates.length > 0 && freshGeneralCandidates.length === 0
+          ? scopedProjectCandidates
+          : scopedProjectCandidates.length > 0
+            ? freshGeneralCandidates
+            : freshGeneralCandidates.length > 0
+              ? freshGeneralCandidates
+              : eligibleCandidates
     const selected = pool[this.randomIndex(pool.length)]
     if (!selected) throw new WordSeekError('Word Seek could not select a word.')
     return selected
@@ -577,6 +646,8 @@ export class WordSeekService {
         id: schema.wordSeekWords.id,
         word: schema.wordSeekWords.word,
         clue: schema.wordSeekWords.clue,
+        aliases: schema.wordSeekWords.aliases,
+        difficulty: schema.wordSeekWords.difficulty,
       })
       .from(schema.wordSeekWords)
       .where(
@@ -586,7 +657,14 @@ export class WordSeekService {
           eq(schema.wordSeekWords.status, 'APPROVED'),
         ),
       )
-    return rows.map((row) => ({ word: normalizeWord(row.word), clue: row.clue, sourceId: row.id }))
+    return rows.map((row) => ({
+      word: normalizeWord(row.word),
+      clue: row.clue,
+      sourceId: row.id,
+      sourceType: 'PROJECT' as const,
+      aliases: row.aliases.map(normalizeWord),
+      difficulty: row.difficulty,
+    }))
   }
 
   private async isAllowedGuess(
@@ -595,8 +673,11 @@ export class WordSeekService {
     session: typeof schema.wordSeekSessions.$inferSelect,
     guess: string,
   ): Promise<boolean> {
-    if (generalWordSet(session.wordLength as WordLength).has(guess)) return true
-    if (session.sourceType !== 'PROJECT') return false
+    if (
+      generalWordSet(session.wordLength as WordLength).has(guess) ||
+      session.acceptedAnswers.map(normalizeWord).includes(guess)
+    )
+      return true
     const [projectWord] = await database
       .select({ id: schema.wordSeekWords.id })
       .from(schema.wordSeekWords)
@@ -606,6 +687,7 @@ export class WordSeekService {
           eq(schema.wordSeekWords.word, guess),
           eq(schema.wordSeekWords.wordLength, session.wordLength),
           eq(schema.wordSeekWords.status, 'APPROVED'),
+          lte(schema.wordSeekWords.updatedAt, session.createdAt),
         ),
       )
       .limit(1)
@@ -635,4 +717,14 @@ export class WordSeekService {
       .returning({ id: schema.wordSeekSessions.id })
     return { guessesUsed: await this.guessCount(database, session?.id ?? sessionId) }
   }
+}
+
+function configuredNumber(input: Record<string, unknown>, key: string, fallback: number): number {
+  const value = input[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+function matchesDifficulty(value: string, difficulty: ResolvedDifficulty): boolean {
+  const normalized = value.trim().toUpperCase()
+  return normalized === 'AUTO' || normalized === difficulty
 }

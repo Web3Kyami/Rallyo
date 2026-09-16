@@ -10,6 +10,7 @@ import { ScoreEventService } from '../../src/core/score-event-service'
 import * as schema from '../../src/db/schema'
 import { createDatabase } from '../../src/db/client'
 import { SocialTaskService } from '../../src/core/social-task-service'
+import { SeasonService } from '../../src/core/season-service'
 
 const databaseUrl = process.env.DATABASE_URL
 const describeDatabase = databaseUrl ? describe : describe.skip
@@ -244,6 +245,162 @@ describeDatabase('Phase 7.5A platform contract against PostgreSQL', () => {
         .from(schema.scoreEvents)
         .where(eq(schema.scoreEvents.sourceType, 'SOCIAL_TASK')),
     ).toHaveLength(1)
+  })
+
+  it('creates and closes a community season without wallet configuration', async () => {
+    const seasons = new SeasonService(db)
+
+    await expect(
+      seasons.createAndActivate({
+        communityId: ids.communityOne,
+        name: 'Overlapping season',
+        startsAt: now,
+        endsAt: new Date(now.getTime() + 60_000),
+        winnerCount: 3,
+        actorTelegramUserId: 501n,
+      }),
+    ).rejects.toThrow('active season')
+
+    await expect(
+      seasons.createAndActivate({
+        communityId: ids.communityTwo,
+        name: 'Unauthorized season',
+        startsAt: now,
+        endsAt: new Date(now.getTime() + 60_000),
+        winnerCount: 3,
+        actorTelegramUserId: 501n,
+      }),
+    ).rejects.toThrow('not authorized')
+
+    await db.insert(schema.communityAdmins).values({
+      communityId: ids.communityTwo,
+      telegramUserId: 502n,
+      verifiedAt: now,
+      lastVerifiedAt: now,
+    })
+    const created = await seasons.createAndActivate({
+      communityId: ids.communityTwo,
+      name: 'Community two season',
+      startsAt: now,
+      endsAt: new Date(now.getTime() + 60_000),
+      winnerCount: 5,
+      actorTelegramUserId: 502n,
+    })
+
+    expect(created.status).toBe('ACTIVE')
+    expect(created.winnerCount).toBe(5)
+    expect((await seasons.activeForCommunity(ids.communityTwo, now))?.id).toBe(created.id)
+
+    const ended = await seasons.end({
+      communityId: ids.communityTwo,
+      seasonId: created.id,
+      actorTelegramUserId: 502n,
+    })
+    expect(ended?.status).toBe('CLOSED')
+    expect(await seasons.activeForCommunity(ids.communityTwo, now)).toBeNull()
+  })
+
+  it('supports recurring screenshot proof and enforces its daily cap', async () => {
+    const tasks = new SocialTaskService(db)
+    const task = await tasks.createTask({
+      communityId: ids.communityOne,
+      title: 'Daily contribution',
+      instructions: 'Share a project update and attach proof.',
+      points: 7,
+      startsAt: new Date(now.getTime() - 60_000),
+      endsAt: new Date(now.getTime() + 60 * 60_000),
+      taskType: 'RECURRING',
+      platform: 'X',
+      action: 'POST',
+      proofType: 'URL_SCREENSHOT',
+      maxApprovedSubmissionsPerPlayerPerDay: 1,
+      createdByTelegramUserId: 501n,
+    })
+
+    const submission = await tasks.submit({
+      taskId: task.id,
+      playerId: ids.playerOne,
+      url: 'https://example.com/daily-1',
+      proofType: 'URL_SCREENSHOT',
+      screenshotFileId: 'telegram-file-1',
+      screenshotFileUniqueId: 'telegram-unique-1',
+      screenshotMimeType: 'image/png',
+      screenshotFileSize: 1024,
+      now,
+    })
+    expect(submission.proofType).toBe('URL_SCREENSHOT')
+    expect(submission.screenshotFileId).toBe('telegram-file-1')
+
+    await tasks.approve({
+      submissionId: submission.id,
+      reviewerTelegramUserId: 501n,
+      now,
+    })
+    await expect(
+      tasks.submit({
+        taskId: task.id,
+        playerId: ids.playerOne,
+        url: 'https://example.com/daily-2',
+        proofType: 'URL_SCREENSHOT',
+        screenshotFileId: 'telegram-file-2',
+        now: new Date(now.getTime() + 30 * 60_000),
+      }),
+    ).rejects.toThrow('daily submission limit')
+  })
+
+  it('supports campaign completion limits and rejection without points', async () => {
+    const tasks = new SocialTaskService(db)
+    const task = await tasks.createTask({
+      communityId: ids.communityOne,
+      title: 'Campaign contribution',
+      instructions: 'Complete the campaign and submit its link.',
+      points: 9,
+      startsAt: new Date(now.getTime() - 60_000),
+      endsAt: new Date(now.getTime() + 60 * 60_000),
+      taskType: 'CAMPAIGN',
+      platform: 'INSTAGRAM',
+      action: 'COMMENT_REPLY',
+      targetUrl: 'https://example.com/campaign',
+      proofType: 'URL',
+      completionCapPerPlayer: 1,
+      createdByTelegramUserId: 501n,
+    })
+    const submission = await tasks.submit({
+      taskId: task.id,
+      playerId: ids.playerOne,
+      url: 'https://example.com/proof',
+      proofType: 'URL',
+      now,
+    })
+    await tasks.reject({
+      submissionId: submission.id,
+      reviewerTelegramUserId: 501n,
+      now,
+    })
+    expect(await db.select().from(schema.scoreEvents)).toHaveLength(0)
+
+    const retry = await tasks.submit({
+      taskId: task.id,
+      playerId: ids.playerOne,
+      url: 'https://example.com/proof-retry',
+      proofType: 'URL',
+      now,
+    })
+    await tasks.approve({
+      submissionId: retry.id,
+      reviewerTelegramUserId: 501n,
+      now,
+    })
+    await expect(
+      tasks.submit({
+        taskId: task.id,
+        playerId: ids.playerOne,
+        url: 'https://example.com/proof-again',
+        proofType: 'URL',
+        now: new Date(now.getTime() + 1_000),
+      }),
+    ).rejects.toThrow('per-player limit')
+    expect(await db.select().from(schema.scoreEvents)).toHaveLength(1)
   })
 
   it('creates one audited positive manual award and rejects unauthorized awards', async () => {

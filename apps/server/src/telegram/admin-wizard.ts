@@ -14,6 +14,30 @@ export type AdminWizardState =
   | 'POINTS'
   | 'CONFIRM'
   | 'MANUAL_QUESTION'
+  | 'SEASON_NAME'
+  | 'SEASON_DURATION'
+  | 'SEASON_END_DATE'
+  | 'SEASON_WINNERS'
+  | 'SEASON_CONFIRM'
+  | 'TASK_TYPE'
+  | 'TASK_PLATFORM'
+  | 'TASK_ACTION'
+  | 'TASK_TITLE'
+  | 'TASK_TARGET'
+  | 'TASK_INSTRUCTIONS'
+  | 'TASK_POINTS'
+  | 'TASK_PROOF'
+  | 'TASK_CAP'
+  | 'TASK_DURATION'
+  | 'TASK_CONFIRM'
+  | 'WORD_VALUE'
+  | 'WORD_CLUE'
+  | 'WORD_CONFIRM'
+  | 'QUESTION_MODE'
+  | 'QUESTION_PROMPT'
+  | 'QUESTION_ANSWER'
+  | 'QUESTION_OPTIONS'
+  | 'QUESTION_CONFIRM'
 
 export async function saveAdminWizardSession(
   database: Database,
@@ -99,4 +123,35 @@ export async function clearAdminWizardSession(
         eq(schema.adminWizardSessions.communityId, communityId),
       ),
     )
+}
+
+export async function recordAdminWizardPrompt(
+  database: Database,
+  input: {
+    readonly telegramUserId: bigint
+    readonly communityId: string
+    readonly chatId: number
+    readonly messageId: number
+    readonly now: Date
+  },
+): Promise<void> {
+  const session = await getAdminWizardSession(
+    database,
+    input.telegramUserId,
+    input.communityId,
+    input.now,
+  )
+  if (!session) return
+
+  await database
+    .update(schema.adminWizardSessions)
+    .set({
+      data: {
+        ...session.data,
+        _wizardChatId: input.chatId,
+        _wizardPromptMessageId: input.messageId,
+      },
+      updatedAt: input.now,
+    })
+    .where(eq(schema.adminWizardSessions.id, session.id))
 }

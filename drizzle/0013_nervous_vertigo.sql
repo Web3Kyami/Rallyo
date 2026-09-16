@@ -1,0 +1,5 @@
+ALTER TABLE "questions" ADD CONSTRAINT "questions_difficulty_valid" CHECK ("questions"."difficulty" IN ('AUTO', 'EASY', 'MEDIUM', 'HARD', 'easy', 'medium', 'hard'));--> statement-breakpoint
+ALTER TABLE "rounds" ADD CONSTRAINT "rounds_difficulty_valid" CHECK ("rounds"."difficulty" IN ('EASY', 'MEDIUM', 'HARD'));--> statement-breakpoint
+ALTER TABLE "scramble_rounds" ADD CONSTRAINT "scramble_rounds_difficulty_valid" CHECK ("scramble_rounds"."difficulty" IN ('EASY', 'MEDIUM', 'HARD'));--> statement-breakpoint
+ALTER TABLE "word_seek_sessions" ADD CONSTRAINT "word_seek_sessions_difficulty_valid" CHECK ("word_seek_sessions"."difficulty" IN ('EASY', 'MEDIUM', 'HARD'));--> statement-breakpoint
+ALTER TABLE "word_seek_words" ADD CONSTRAINT "word_seek_words_difficulty_valid" CHECK ("word_seek_words"."difficulty" IN ('AUTO', 'EASY', 'MEDIUM', 'HARD'));

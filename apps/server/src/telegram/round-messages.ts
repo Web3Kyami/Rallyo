@@ -11,9 +11,20 @@ export type RoundMessageInput = {
   readonly mode: 'QUICK' | 'FIRST_CORRECT' | 'CLUE'
   readonly presentation?: string | null
   readonly projectQuizConfig?: Record<string, unknown> | null
+  readonly difficulty?: string | null
+  readonly presentationType?:
+    'TEXT' | 'MCQ' | 'IMAGE_IDENTIFY' | 'IMAGE_CLUE' | 'MATH' | 'PROGRESSIVE_CLUE' | null
   readonly prompt: string
   readonly options: readonly QuestionOption[] | null
   readonly clueData: ClueData | null
+  readonly hints?: readonly string[] | null
+  readonly mediaType?: string | null
+  readonly mediaFileId?: string | null
+  readonly mediaAssetRef?: string | null
+  readonly mediaSource?: string | null
+  readonly mediaCredit?: string | null
+  readonly mediaAlt?: string | null
+  readonly mediaSpoiler?: boolean
   readonly basePoints: number
   readonly startsAt: Date
   readonly locksAt: Date
@@ -21,40 +32,63 @@ export type RoundMessageInput = {
 
 export function renderRoundMessage(round: RoundMessageInput, now: Date = round.startsAt) {
   const presentation = round.presentation ?? (round.mode === 'QUICK' ? 'multiple_choice' : 'typed')
+  const presentationType = contentPresentation(round, presentation)
+  const difficulty = (round.difficulty ?? 'MEDIUM').toUpperCase()
+  const title = presentationTitle(presentationType)
+  const timing = `⭐ ${projectQuizPoints(round)} pts · ⏱ ${roundDurationSeconds(round)}s`
+  const media = round.mediaFileId
+    ? {
+        type: 'photo' as const,
+        media: round.mediaFileId,
+        hasSpoiler: Boolean(round.mediaSpoiler),
+      }
+    : undefined
 
-  if (round.presentation && presentation === 'multiple_choice') {
+  if (presentationType === 'MCQ' || (round.presentation && presentation === 'multiple_choice')) {
     return {
-      text: `<b>🧠 PROJECT QUIZ</b>\n\n${escapeHtml(round.prompt)}\n\n<i>Choose the correct answer. First correct wins.\n🏁 ${projectQuizPoints(round)} pts · ${roundDurationSeconds(round)} sec</i>`,
+      text: `<b>${title}</b> · ${difficulty}\n\n<blockquote>${escapeHtml(round.prompt)}</blockquote>\n\n<i>Choose the correct answer. First correct wins.\n${timing}</i>`,
+      ...(media
+        ? {
+            media,
+            caption: `<b>${title}</b> · ${difficulty}\n\n<blockquote>${escapeHtml(round.prompt)}</blockquote>\n\n<i>Choose the correct answer. First correct wins.\n${timing}</i>`,
+          }
+        : {}),
       ...(round.options?.length ? { replyMarkup: quickQuizKeyboard(round.id, round.options) } : {}),
     }
   }
 
-  if (round.presentation && presentation === 'typed') {
+  if (
+    presentationType !== 'PROGRESSIVE_CLUE' &&
+    (round.presentation || presentationType !== 'TEXT')
+  ) {
     const config = projectQuizConfig(round)
     const clueNumber = clueNumberAt(round, now)
-    const clues =
-      config?.hintsEnabled && round.clueData ? round.clueData.clues.slice(0, clueNumber) : []
+    const clues = config?.hintsEnabled
+      ? (round.hints ?? round.clueData?.clues ?? []).slice(0, clueNumber)
+      : []
     const clueText = clues.length
       ? `\n\n${clues.map((clue, index) => `Hint ${index + 1}\n&gt; ${escapeHtml(clue)}`).join('\n\n')}`
       : ''
     const points = projectQuizPoints(round, config?.hintsEnabled ? clueNumber : undefined)
+    const text = `<b>${title}</b> · ${difficulty}\n\n<blockquote>${escapeHtml(round.prompt)}</blockquote>${clueText}\n\n<i>Reply with your answer. First correct wins.\n⭐ ${points} pts · ⏱ ${roundDurationSeconds(round)}s</i>`
 
     return {
-      text: `<b>🧠 PROJECT QUIZ / RACE</b>\n\n${escapeHtml(round.prompt)}${clueText}\n\n<i>Reply with your answer. First correct wins.\n🏁 ${points} pts · ${roundDurationSeconds(round)} sec</i>`,
+      text,
+      ...(media ? { media, caption: text } : {}),
     }
   }
 
   switch (round.mode) {
     case 'QUICK':
       return {
-        text: `<b>🧠 QUICK QUIZ</b>\n\n${escapeHtml(round.prompt)}\n\n<i>Choose the correct answer.\n🏁 ${roundDurationSeconds(round)} sec · ${round.basePoints} pts</i>`,
+        text: `<b>🧠 PROJECT QUIZ / RACE</b> · ${difficulty}\n\n<blockquote>${escapeHtml(round.prompt)}</blockquote>\n\n<i>Choose the correct answer.\n⭐ ${round.basePoints} pts · ⏱ ${roundDurationSeconds(round)}s</i>`,
         ...(round.options?.length
           ? { replyMarkup: quickQuizKeyboard(round.id, round.options) }
           : {}),
       }
     case 'FIRST_CORRECT':
       return {
-        text: `<b>🧠 FIRST CORRECT</b>\n\n${escapeHtml(round.prompt)}\n\n<i>Reply with your answer. The first correct reply wins ${round.basePoints} pts.</i>`,
+        text: `<b>🧠 PROJECT QUIZ / RACE</b> · ${difficulty}\n\n<blockquote>${escapeHtml(round.prompt)}</blockquote>\n\n<i>Reply with your answer. First correct wins.\n⭐ ${round.basePoints} pts · ⏱ ${roundDurationSeconds(round)}s</i>`,
       }
     case 'CLUE':
       return renderClueRoundMessage(round, clueNumberAt(round, now))
@@ -70,7 +104,7 @@ export function renderClueRoundMessage(round: RoundMessageInput, clueNumber: 1 |
     .join('\n\n')
 
   return {
-    text: `<b>🧠 CLUE ROUND</b>\n\n${escapeHtml(round.prompt)}\n\n${clueText}\n\n<i>${points} pts available</i>`,
+    text: `<b>🧠 PROJECT QUIZ / RACE · PROGRESSIVE CLUE</b>\n\n<blockquote>${escapeHtml(round.prompt)}</blockquote>\n\n${clueText}\n\n<i>⭐ ${points} pts available · ⏱ ${roundDurationSeconds(round)}s</i>`,
   }
 }
 
@@ -181,6 +215,37 @@ function projectQuizPoints(
 
 function roundDurationSeconds(round: Pick<RoundMessageInput, 'startsAt' | 'locksAt'>) {
   return Math.max(1, Math.ceil((round.locksAt.getTime() - round.startsAt.getTime()) / 1000))
+}
+
+function contentPresentation(
+  round: RoundMessageInput,
+  legacyPresentation: string,
+): NonNullable<RoundMessageInput['presentationType']> {
+  if (round.presentationType && round.presentationType !== 'TEXT') return round.presentationType
+  if (legacyPresentation === 'multiple_choice') return 'MCQ'
+  if (legacyPresentation === 'typed') return round.mode === 'CLUE' ? 'PROGRESSIVE_CLUE' : 'TEXT'
+  if (round.mode === 'QUICK') return 'MCQ'
+  if (round.mode === 'CLUE') return 'PROGRESSIVE_CLUE'
+  return 'TEXT'
+}
+
+function presentationTitle(
+  presentation: NonNullable<RoundMessageInput['presentationType']>,
+): string {
+  switch (presentation) {
+    case 'MCQ':
+      return '🧠 PROJECT QUIZ / RACE'
+    case 'IMAGE_IDENTIFY':
+      return '🖼️ PROJECT QUIZ / RACE · IMAGE IDENTIFY'
+    case 'IMAGE_CLUE':
+      return '🔍 PROJECT QUIZ / RACE · IMAGE CLUE'
+    case 'MATH':
+      return '➗ PROJECT QUIZ / RACE · MATH'
+    case 'PROGRESSIVE_CLUE':
+      return '💡 PROJECT QUIZ / RACE · PROGRESSIVE CLUE'
+    case 'TEXT':
+      return '🧠 PROJECT QUIZ / RACE'
+  }
 }
 
 function escapeHtml(value: string): string {

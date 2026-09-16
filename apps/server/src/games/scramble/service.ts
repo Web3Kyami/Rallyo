@@ -7,6 +7,7 @@ import * as schema from '../../db/schema'
 import type { CommunityGameConfigService } from '../../core/community-game-config-service'
 import { awardScoreEvent } from '../../core/score-event-service'
 import { GENERAL_SCRAMBLE_TERMS } from './terms'
+import { resolveGameDifficulty, scrambleDifficultyPreset } from '../difficulty'
 import {
   isScrambleableTerm,
   maximumUsefulHints,
@@ -18,7 +19,9 @@ import {
 
 type Database = NodePgDatabase<typeof schema>
 
-export type ScrambleRound = typeof schema.scrambleRounds.$inferSelect
+export type ScrambleRound = Omit<typeof schema.scrambleRounds.$inferSelect, 'difficulty'> & {
+  readonly difficulty?: string
+}
 
 export type ScrambleGuessResult =
   | { readonly status: 'WON'; readonly points: number; readonly round: ScrambleRound }
@@ -62,7 +65,15 @@ export class ScrambleService {
     } catch (error) {
       throw new ScrambleStartError(error instanceof Error ? error.message : 'Scramble is disabled.')
     }
-    const { config } = await this.gameConfigurations.getScrambleConfig(input.communityId)
+    const storedConfig = await this.gameConfigurations.getScrambleConfig(input.communityId)
+    const { config } = storedConfig
+    const rawConfig = storedConfig.row?.config ?? {}
+    const difficulty = resolveGameDifficulty(config.difficulty, input.random)
+    const preset = scrambleDifficultyPreset(difficulty)
+    const timeoutSeconds = configuredNumber(rawConfig, 'timeoutSeconds', preset.timeoutSeconds)
+    const minLength = configuredNumber(rawConfig, 'minLength', preset.minLength)
+    const maxLength = configuredNumber(rawConfig, 'maxLength', preset.maxLength)
+    const maxHints = configuredNumber(rawConfig, 'maxHints', preset.maxHints)
 
     return this.database.transaction(async (tx) => {
       const [community] = await tx
@@ -127,7 +138,7 @@ export class ScrambleService {
         .limit(1)
       if (quizRound) throw new ScrambleStartError('Community already has a live quiz round.')
 
-      const candidates = await this.candidatesForSource(tx, input.communityId, config.source)
+      const candidates = await this.candidatesForSource(tx, input.communityId)
       const recentRows =
         config.noRepeatRounds > 0
           ? await tx
@@ -141,8 +152,9 @@ export class ScrambleService {
         candidates,
         new Set(recentRows.map((row) => row.normalizedAnswer)),
         {
-          minLength: config.minLength,
-          maxLength: config.maxLength,
+          difficulty,
+          minLength,
+          maxLength,
           ...(input.random ? { random: input.random } : {}),
         },
       )
@@ -155,27 +167,34 @@ export class ScrambleService {
         )
       }
 
-      const locksAt = new Date(input.now.getTime() + config.timeoutSeconds * 1_000)
+      const locksAt = new Date(input.now.getTime() + timeoutSeconds * 1_000)
       if (locksAt >= season.endsAt) {
         throw new ScrambleStartError(
           'The active season ends before this Scramble round can finish.',
         )
       }
 
-      const usefulHints = maximumUsefulHints(selected.term, config.maxHints)
-      const hintTimingSeconds = config.hintTimingSeconds.slice(0, usefulHints)
-      const pointReductions = config.pointReductions.slice(0, usefulHints)
+      const usefulHints = maximumUsefulHints(selected.term, Math.min(config.maxHints, maxHints))
+      const hintTimingSeconds = (
+        Array.isArray(rawConfig.hintTimingSeconds)
+          ? config.hintTimingSeconds
+          : preset.hintTimingSeconds
+      ).slice(0, usefulHints)
+      const pointReductions = (
+        Array.isArray(rawConfig.pointReductions) ? config.pointReductions : preset.pointReductions
+      ).slice(0, usefulHints)
       const [round] = await tx
         .insert(schema.scrambleRounds)
         .values({
           communityId: input.communityId,
           seasonId: season.id,
-          source: config.source,
+          source: selected.sourceTermId ? 'PROJECT_BRAIN' : 'GENERAL',
           ...(selected.sourceTermId ? { sourceTermId: selected.sourceTermId } : {}),
           term: selected.term,
           normalizedAnswer: selected.normalizedAnswer,
           scrambledTerm: selected.scrambledTerm,
           category: selected.category,
+          difficulty,
           status: 'LIVE',
           startsAt: input.now,
           locksAt,
@@ -473,17 +492,13 @@ export class ScrambleService {
   private async candidatesForSource(
     database: Parameters<Parameters<Database['transaction']>[0]>[0],
     communityId: string,
-    source: 'GENERAL' | 'PROJECT_BRAIN',
   ): Promise<ScrambleCandidate[]> {
-    if (source === 'GENERAL') {
-      return [...GENERAL_SCRAMBLE_TERMS]
-    }
-
-    const rows = await database
+    const questionRows = await database
       .select({
         id: schema.questions.id,
         term: schema.questions.correctAnswer,
         category: schema.questions.category,
+        difficulty: schema.questions.difficulty,
       })
       .from(schema.questions)
       .where(
@@ -500,12 +515,42 @@ export class ScrambleService {
         ),
       )
 
-    return rows.map((row) => ({
+    const projectQuestions = questionRows.map((row) => ({
       term: row.term,
       category: row.category,
       sourceTermId: row.id,
+      difficulty: row.difficulty,
     }))
+    const projectWords = await database
+      .select({
+        id: schema.wordSeekWords.id,
+        term: schema.wordSeekWords.word,
+        difficulty: schema.wordSeekWords.difficulty,
+      })
+      .from(schema.wordSeekWords)
+      .where(
+        and(
+          eq(schema.wordSeekWords.communityId, communityId),
+          eq(schema.wordSeekWords.status, 'APPROVED'),
+        ),
+      )
+
+    return [
+      ...projectQuestions,
+      ...projectWords.map((row) => ({
+        term: row.term,
+        category: 'Project vocabulary',
+        sourceTermId: row.id,
+        difficulty: row.difficulty,
+      })),
+      ...GENERAL_SCRAMBLE_TERMS,
+    ]
   }
+}
+
+function configuredNumber(input: Record<string, unknown>, key: string, fallback: number): number {
+  const value = input[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
 
 export function isProjectScrambleTermUsable(term: string, minLength: number, maxLength: number) {

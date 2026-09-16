@@ -45,6 +45,17 @@ describe('Scramble rules', () => {
     expect(fallback?.term).toBe('alpha')
   })
 
+  it('prefers project vocabulary and falls back to general terms after project repeats', () => {
+    const candidates = [
+      { term: 'project', category: 'Project', sourceTermId: 'word-1' },
+      { term: 'general', category: 'General' },
+    ]
+    expect(selectScrambleTerm(candidates, new Set(), { random: () => 0 })?.term).toBe('project')
+    expect(selectScrambleTerm(candidates, new Set(['project']), { random: () => 0 })?.term).toBe(
+      'general',
+    )
+  })
+
   it('reveals progressive positional hints while retaining one hidden character', () => {
     const first = revealPositionsForHint('telegram', [], 1, 2)
     const second = revealPositionsForHint('telegram', first, 2, 2)
