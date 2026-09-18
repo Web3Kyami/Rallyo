@@ -21,6 +21,7 @@
     "seed:questions": "tsx apps/server/src/scripts/seed-question-bank.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx apps/server/src/db/migrate.ts",
+    "build": "npm run build --workspace=@rallyo/web",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
