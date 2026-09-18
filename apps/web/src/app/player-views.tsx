@@ -11,6 +11,8 @@ import {
   type AppRewards,
   type AppTask,
   type AppTaskDetail,
+  type GlobalLeague,
+  type RallyoProgression,
 } from '../api/client'
 import {
   Avatar,
@@ -38,6 +40,7 @@ import {
   formatDate,
   formatDateTime,
   formatDeadline,
+  getLeagueAvatarId,
   hasStoredAvatarId,
   getStoredAvatarId,
   shortAddress,
@@ -410,9 +413,26 @@ export function PlayerHomePage() {
   const tasks = useResource(tasksLoad)
   const rewards = useResource(rewardsLoad)
   const avatarId = getStoredAvatarId()
+  const [progression, setProgression] = useState<RallyoProgression | null>(
+    data?.progression ?? null,
+  )
+  const [checkinOpen, setCheckinOpen] = useState(() =>
+    Boolean(data && !data.progression.todayClaimed),
+  )
+  const [checkinState, setCheckinState] = useState<
+    'idle' | 'claiming' | 'success' | 'already' | 'error'
+  >('idle')
+  const [checkinError, setCheckinError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!data) return
+    setProgression(data.progression)
+    if (!data.progression.todayClaimed && checkinState === 'idle') setCheckinOpen(true)
+  }, [checkinState, data])
 
   if (!data) return null
   const { player } = data
+  const currentProgression = progression ?? data.progression
 
   const activeTasks = tasks.status === 'ready' ? tasks.data.tasks : []
   const eligibleRewards =
@@ -454,6 +474,34 @@ export function PlayerHomePage() {
           You and profile
         </Link>
       </section>
+
+      <RallyoProgressionSummary progression={currentProgression} />
+
+      {checkinOpen ? (
+        <DailyCheckinDialog
+          error={checkinError}
+          state={checkinState}
+          onClaim={async () => {
+            setCheckinState('claiming')
+            setCheckinError(null)
+            try {
+              const result = await api.claimDailyCheckin()
+              setCheckinState(result.claimed ? 'success' : 'already')
+              await session.refresh()
+              setProgression(result.progression)
+              window.setTimeout(() => setCheckinOpen(false), result.claimed ? 900 : 0)
+            } catch (reason: unknown) {
+              setCheckinState('error')
+              setCheckinError(
+                reason instanceof ApiError
+                  ? reason.message
+                  : 'Daily check-in could not be claimed.',
+              )
+            }
+          }}
+          onClose={() => setCheckinOpen(false)}
+        />
+      ) : null}
 
       {!player.username ? (
         <StatusBanner
@@ -692,6 +740,7 @@ function HomeGames({
           />
         ))}
       </div>
+      <p className="coming-soon-note">More games coming soon</p>
     </section>
   )
 }
@@ -966,172 +1015,75 @@ function CommunityTasks({ tasks }: { readonly tasks: readonly AppTask[] }) {
 
 export function PlayerLeaguePage() {
   const session = useAppSession()
-  const load = useCallback(() => api.listCommunities(), [])
-  const communities = useResource(load)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const selected =
-    communities.status === 'ready'
-      ? (communities.data.communities.find((community) => community.id === selectedId) ??
-        communities.data.communities[0] ??
-        null)
-      : null
-  const detailLoad = useCallback(
-    () =>
-      selected ? api.community(selected.id) : Promise.resolve(null as AppCommunityDetail | null),
-    [selected?.id],
-  )
-  const detail = useResource(detailLoad, Boolean(selected))
-
-  useEffect(() => {
-    if (communities.status === 'ready' && communities.data.communities.length > 0 && !selectedId)
-      setSelectedId(communities.data.communities[0]?.id ?? null)
-  }, [communities, selectedId])
+  const load = useCallback(() => api.globalLeague(), [])
+  const league = useResource(load)
 
   if (session.status !== 'ready') return null
 
   return (
     <PageFrame
-      eyebrow="LEAGUE"
-      title="Your community leagues"
-      detail="Compare real community-season standings without turning separate scores into a fake global metric."
+      eyebrow="GLOBAL LEAGUE"
+      title="Rallyo Global League"
+      detail="Global standing is based only on Rallyo XP. Community season points stay in their own league."
       action={
-        <ToneBadge tone="info" icon="shield">
-          Global league unavailable
+        <ToneBadge tone="accent" icon="trophy">
+          Rallyo XP
         </ToneBadge>
       }
     >
-      <StatusBanner
-        tone="info"
-        icon="trophy"
-        title="Rallyo-wide league is not available yet"
-        detail="Community seasons remain the source of truth for your rank and points. Overall and game-global metrics are hidden until they are backed by a real service."
-      />
-      {communities.status === 'loading' ? <LoadingLines label="Loading leagues" /> : null}
-      {communities.status === 'error' ? (
+      {league.status === 'loading' ? <LoadingLines label="Loading global league" /> : null}
+      {league.status === 'error' ? (
         <ErrorState
           title="Leagues are unavailable"
-          detail={resourceError(communities, 'Your community records could not be loaded.')}
-          onRetry={communities.retry}
+          detail={resourceError(league, 'The Rallyo Global League could not be loaded.')}
+          onRetry={league.retry}
         />
       ) : null}
-      {communities.status === 'ready' && communities.data.communities.length === 0 ? (
-        <EmptyState
-          title="No community leagues yet"
-          detail="Join a Rallyo community in Telegram to appear in a real season standings list."
-          action={
-            <Link className="button button-primary" to="/app/pair">
-              Connect Telegram
-            </Link>
-          }
-        />
-      ) : null}
-      {communities.status === 'ready' && communities.data.communities.length > 0 ? (
-        <div className="league-layout">
-          <div className="league-community-list">
-            {communities.data.communities.map((community) => (
-              <button
-                className={`league-community-choice${community.id === selected?.id ? ' is-selected' : ''}`}
-                key={community.id}
-                type="button"
-                onClick={() => setSelectedId(community.id)}
-              >
-                <span className="community-mark">{community.title.slice(0, 1).toUpperCase()}</span>
-                <span>
-                  <strong>{community.title}</strong>
-                  <small>{community.activeSeason?.name ?? 'No active season'}</small>
-                </span>
-                <b>{community.rank ? `#${community.rank}` : '—'}</b>
-              </button>
-            ))}
-          </div>
-          <LeagueFocus selected={selected} detail={detail} />
-        </div>
-      ) : null}
+      {league.status === 'ready' ? <GlobalLeagueContent data={league.data} /> : null}
     </PageFrame>
   )
 }
 
-function LeagueFocus({
-  selected,
-  detail,
-}: {
-  readonly selected: AppCommunity | null
-  readonly detail: ResourceState<AppCommunityDetail | null> & { readonly retry: () => void }
-}) {
-  if (!selected) return null
-  if (detail.status === 'loading' || detail.status === 'idle')
-    return (
-      <div className="league-focus">
-        <LoadingLines label="Loading season" />
-      </div>
-    )
-  if (detail.status === 'error')
-    return (
-      <div className="league-focus">
-        <ErrorState
-          title="Season data needs attention"
-          detail={resourceError(detail, 'This league could not be loaded.')}
-          onRetry={detail.retry}
-        />
-      </div>
-    )
-  if (!detail.data) return null
-  const topThree = detail.data.leaderboard.slice(0, 3)
+function GlobalLeagueContent({ data }: { readonly data: GlobalLeague }) {
+  const visiblePlayerIds = new Set(data.leaderboard.map((entry) => entry.playerId))
+  const currentIsPinned = !visiblePlayerIds.has(data.currentPlayer.playerId)
   return (
-    <section className="league-focus">
+    <section className="global-league-panel">
       <div className="league-focus-heading">
         <div>
-          <SectionLabel>SEASON STANDINGS</SectionLabel>
-          <h2>{selected.title}</h2>
-          <p>{detail.data.activeSeason?.name ?? 'No active season right now.'}</p>
+          <SectionLabel>RALLYO XP STANDINGS</SectionLabel>
+          <h2>Top Players</h2>
+          <p>One global ranking across every Rallyo community.</p>
         </div>
-        <Link className="button button-outline" to={`/app/communities/${selected.id}`}>
-          View community
-        </Link>
+        <div className="global-league-current-summary">
+          <span>Your rank</span>
+          <strong>#{data.currentPlayer.rank}</strong>
+        </div>
       </div>
-      {detail.data.activeSeason ? (
-        <div className="league-focus-season">
-          <span>Season ends</span>
-          <strong>{formatDateTime(detail.data.activeSeason.endsAt)}</strong>
-        </div>
-      ) : null}
-      {!detail.data.activeSeason ? (
-        <EmptyState
-          title="No active season right now"
-          detail="This community is ready for its next season."
-        />
-      ) : null}
-      {detail.data.activeSeason && topThree.length === 0 ? (
-        <EmptyState
-          title="No ranked players yet"
-          detail="The season has no scored participation yet."
-        />
-      ) : null}
-      {topThree.length > 0 ? (
-        <div className="league-podium">
-          {topThree.map((row) => (
-            <div className={`league-podium-item league-podium-item-${row.rank}`} key={row.playerId}>
-              <span className="league-podium-rank">#{row.rank}</span>
-              <Avatar name={row.displayName} size="md" rank={row.rank} />
-              <strong>{row.displayName}</strong>
-              <b>
-                {row.points.toLocaleString()} <small>pts</small>
-              </b>
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {detail.data.leaderboard.length > 3 ? (
-        <div className="leaderboard-list league-rest-list">
-          {detail.data.leaderboard.slice(3).map((row) => (
-            <LeaderboardRow
-              key={row.playerId}
-              current={row.isCurrentPlayer}
-              name={row.displayName}
-              rank={row.rank}
-              score={row.points}
-            />
-          ))}
+      <div className="leaderboard-list global-league-list">
+        {data.leaderboard.map((row) => (
+          <LeaderboardRow
+            key={row.playerId}
+            avatarId={row.isCurrentPlayer ? getStoredAvatarId() : getLeagueAvatarId(row.playerId)}
+            current={row.isCurrentPlayer}
+            name={row.displayName}
+            rank={row.rank}
+            score={row.totalXp}
+            scoreLabel="XP"
+          />
+        ))}
+      </div>
+      {currentIsPinned ? (
+        <div className="global-league-pinned">
+          <SectionLabel>YOUR POSITION</SectionLabel>
+          <LeaderboardRow
+            avatarId={getStoredAvatarId()}
+            current
+            name={data.currentPlayer.displayName}
+            rank={data.currentPlayer.rank}
+            score={data.currentPlayer.totalXp}
+            scoreLabel="XP"
+          />
         </div>
       ) : null}
     </section>
@@ -1488,7 +1440,7 @@ export function PlayerProfilePage() {
   const session = useAppSession()
   const [copied, setCopied] = useState(false)
   if (session.status !== 'ready') return null
-  const { player, wallet, communities } = session.data
+  const { player, wallet, communities, progression } = session.data
   const avatarId = getStoredAvatarId()
   const copyAddress = async () => {
     if (!wallet.linked) return
@@ -1523,6 +1475,8 @@ export function PlayerProfilePage() {
           Change avatar
         </Link>
       </section>
+
+      <RallyoProgressionSummary progression={progression} showCheckinState />
 
       {!player.username ? (
         <StatusBanner
@@ -1611,6 +1565,106 @@ export function PlayerProfilePage() {
         )}
       </section>
     </PageFrame>
+  )
+}
+
+function RallyoProgressionSummary({
+  progression,
+  showCheckinState = false,
+}: {
+  readonly progression: RallyoProgression
+  readonly showCheckinState?: boolean
+}) {
+  return (
+    <section className="rallyo-progression-card">
+      <div>
+        <SectionLabel>RALLYO PROGRESSION</SectionLabel>
+        <h2>Rallyo XP</h2>
+        <p>Global across communities. Community points stay separate.</p>
+      </div>
+      <div className="rallyo-progression-stats">
+        <div>
+          <span>Rallyo XP</span>
+          <strong>{progression.totalXp.toLocaleString()}</strong>
+        </div>
+        <div>
+          <span>Global rank</span>
+          <strong>{progression.globalRank ? `#${progression.globalRank}` : 'Unranked'}</strong>
+        </div>
+      </div>
+      {showCheckinState ? (
+        <div className="rallyo-checkin-state">
+          <span>Daily check-in</span>
+          <strong>{progression.todayClaimed ? 'Claimed today' : 'Available today'}</strong>
+          <small>
+            {progression.todayClaimed
+              ? `Next claim ${formatDateTime(progression.nextEligibleAt)}`
+              : 'Claim +10 Rallyo XP from Home.'}
+          </small>
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+function DailyCheckinDialog({
+  error,
+  onClaim,
+  onClose,
+  state,
+}: {
+  readonly error: string | null
+  readonly onClaim: () => Promise<void>
+  readonly onClose: () => void
+  readonly state: 'idle' | 'claiming' | 'success' | 'already' | 'error'
+}) {
+  const success = state === 'success'
+  return (
+    <div className="daily-checkin-backdrop">
+      <section
+        aria-label="Daily check-in"
+        aria-modal="true"
+        className={`daily-checkin-dialog${success ? ' is-success' : ''}`}
+        role="dialog"
+      >
+        <div className="daily-checkin-mark" aria-hidden="true">
+          {success ? <Icon name="check" size={26} /> : <Icon name="spark" size={25} />}
+        </div>
+        {success ? (
+          <div>
+            <SectionLabel>CHECK-IN COMPLETE</SectionLabel>
+            <h2>+10 Rallyo XP</h2>
+            <p>Your global position is updated.</p>
+          </div>
+        ) : (
+          <div>
+            <SectionLabel>DAILY CHECK-IN</SectionLabel>
+            <h2>Claim +10 Rallyo XP</h2>
+            <p>One claim per UTC day.</p>
+          </div>
+        )}
+        {error ? (
+          <p className="entry-form-error" role="alert">
+            {error}
+          </p>
+        ) : null}
+        {!success ? (
+          <div className="daily-checkin-actions">
+            <Button
+              icon="spark"
+              loading={state === 'claiming'}
+              type="button"
+              onClick={() => void onClaim()}
+            >
+              Claim XP
+            </Button>
+            <button className="text-button" type="button" onClick={onClose}>
+              Maybe later
+            </button>
+          </div>
+        ) : null}
+      </section>
+    </div>
   )
 }
 

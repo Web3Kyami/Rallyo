@@ -12,6 +12,7 @@ import {
 import { assertCommunityAdmin, CommunityAuthorizationError } from './community-authorization'
 import { communityAdminSnapshot, listAdminCommunities } from '../telegram/persistence'
 import { QuestionBankService, QuestionBankValidationError } from './question-bank-service'
+import { RallyoXpService } from './rallyo-xp-service'
 import { RewardService } from './reward-service'
 import { RoundService } from './round-service'
 import { SocialTaskError, SocialTaskService } from './social-task-service'
@@ -47,6 +48,7 @@ export class AppApiService {
   private readonly rewardService: RewardService
   private readonly socialTasks: SocialTaskService
   private readonly wordSeek: WordSeekService
+  private readonly rallyoXp: RallyoXpService
 
   constructor(private readonly database: RallyoDatabase) {
     this.roundService = new RoundService(database)
@@ -58,6 +60,7 @@ export class AppApiService {
     )
     this.socialTasks = new SocialTaskService(database)
     this.wordSeek = new WordSeekService(database, this.gameConfigurations)
+    this.rallyoXp = new RallyoXpService(database)
   }
 
   async bootstrap(actor: AppSessionActor, now = new Date()) {
@@ -94,14 +97,27 @@ export class AppApiService {
         displayName: identity?.displayName ?? 'Rallyo player',
         username: identity?.username ?? null,
       },
+      progression: await this.progression(actor, now),
       wallet: wallet ? { linked: true, address: wallet.address } : { linked: false },
       communities: await this.listCommunities(actor, now),
       adminCommunities: await this.adminCommunities(actor),
       featureFlags: {
         walletLinking: true,
-        globalLeague: false,
+        globalLeague: true,
       },
     }
+  }
+
+  async progression(actor: AppSessionActor, now = new Date()) {
+    return this.rallyoXp.progression(actor.playerId, now)
+  }
+
+  async claimDailyCheckin(actor: AppSessionActor, now = new Date()) {
+    return this.rallyoXp.claimDailyCheckin(actor.playerId, now)
+  }
+
+  async globalLeague(actor: AppSessionActor) {
+    return this.rallyoXp.globalLeague(actor.playerId)
   }
 
   async listCommunities(actor: AppSessionActor, now = new Date()) {

@@ -263,6 +263,50 @@ describe('server health', () => {
     await sessionApp.close()
   })
 
+  it('keeps Rallyo progression and league routes behind the app session boundary', async () => {
+    const actor = {
+      sessionId: 'session-progression',
+      playerId: 'player-progression',
+      telegramIdentityId: null,
+      telegramUserId: null,
+      targetCommunityId: null,
+      targetMode: 'player' as const,
+      expiresAt: new Date('2026-09-18T20:00:00.000Z'),
+    }
+    const sessionApp = buildServer({
+      appSessionService: {
+        getSession: (token: string | undefined) =>
+          Promise.resolve(token === 'progression-session' ? actor : null),
+        revokeSession: () => Promise.resolve(),
+        exchangeCode: () => Promise.reject(new Error('not used')),
+      } as never,
+      appApiService: {
+        progression: () => Promise.resolve({ totalXp: 0 }),
+        claimDailyCheckin: () => Promise.resolve({ claimed: true, xpAwarded: 10 }),
+        globalLeague: () => Promise.resolve({ leaderboard: [], currentPlayer: {} }),
+      } as never,
+    })
+
+    const urls = [
+      ['/api/app/progression', 'GET'],
+      ['/api/app/progression/daily-checkin', 'POST'],
+      ['/api/app/league', 'GET'],
+    ] as const
+    for (const [url, method] of urls) {
+      const anonymous = await sessionApp.inject({ method, url })
+      expect(anonymous.statusCode).toBe(401)
+    }
+
+    const authenticated = await sessionApp.inject({
+      method: 'GET',
+      url: '/api/app/progression',
+      headers: { cookie: 'rallyo_session=progression-session' },
+    })
+    expect(authenticated.statusCode).toBe(200)
+    expect(authenticated.json()).toEqual({ totalXp: 0 })
+    await sessionApp.close()
+  })
+
   it('routes community admin game changes through the authenticated session', async () => {
     const calls: unknown[] = []
     const app = buildServer({

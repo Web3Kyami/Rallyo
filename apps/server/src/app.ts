@@ -289,6 +289,36 @@ export function buildServer(options: ServerOptions = {}) {
       }
     })
 
+    app.get('/api/app/progression', async (request, reply) => {
+      const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+      if (!actor) return
+      try {
+        return await appApiService.progression(actor)
+      } catch (error) {
+        return sendAppApiError(reply, error)
+      }
+    })
+
+    app.post('/api/app/progression/daily-checkin', async (request, reply) => {
+      const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+      if (!actor) return
+      try {
+        return await appApiService.claimDailyCheckin(actor)
+      } catch (error) {
+        return sendAppApiError(reply, error)
+      }
+    })
+
+    app.get('/api/app/league', async (request, reply) => {
+      const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+      if (!actor) return
+      try {
+        return await appApiService.globalLeague(actor)
+      } catch (error) {
+        return sendAppApiError(reply, error)
+      }
+    })
+
     app.get('/api/app/communities', async (request, reply) => {
       const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
       if (!actor) return

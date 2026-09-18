@@ -2348,6 +2348,70 @@
   background: var(--surface);
 }
 
+.rallyo-progression-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  margin-top: 16px;
+  padding: 18px 20px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-card);
+  background: var(--lime-highlight);
+  box-shadow: var(--shadow-secondary);
+}
+
+.rallyo-progression-card h2 {
+  margin: 3px 0 0;
+  font-family: var(--font-display);
+  font-size: 25px;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.rallyo-progression-card p {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+}
+
+.rallyo-progression-stats {
+  display: flex;
+  gap: 24px;
+}
+
+.rallyo-progression-stats div,
+.rallyo-checkin-state {
+  display: grid;
+  gap: 2px;
+}
+
+.rallyo-progression-stats span,
+.rallyo-checkin-state span {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.rallyo-progression-stats strong {
+  font-family: var(--font-display);
+  font-size: 28px;
+  line-height: 1;
+}
+
+.rallyo-checkin-state {
+  grid-column: 1 / -1;
+  padding-top: 14px;
+  border-top: 1px solid rgba(17, 17, 17, 0.24);
+}
+
+.rallyo-checkin-state strong {
+  font-size: 16px;
+}
+
+.rallyo-checkin-state small {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
 .player-identity-panel {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -2540,6 +2604,13 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+
+.coming-soon-note {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .game-strip .game-card {
@@ -3030,6 +3101,131 @@
   padding: 20px;
 }
 
+.global-league-panel {
+  margin-top: 20px;
+  padding: 20px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.global-league-current-summary {
+  display: grid;
+  min-width: 94px;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-control);
+  background: var(--rallyo-soft);
+  text-align: right;
+}
+
+.global-league-current-summary span {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.global-league-current-summary strong {
+  font-family: var(--font-display);
+  font-size: 25px;
+  line-height: 1;
+}
+
+.global-league-list {
+  margin-top: 20px;
+}
+
+.global-league-pinned {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 2px solid var(--ink);
+}
+
+.daily-checkin-backdrop {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(17, 17, 17, 0.42);
+}
+
+.daily-checkin-dialog {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px;
+  width: min(100%, 440px);
+  padding: 22px;
+  border: 3px solid var(--ink);
+  border-radius: var(--radius-panel);
+  background: var(--rallyo-soft);
+  box-shadow: var(--shadow-primary);
+  animation: daily-checkin-enter 180ms ease-out;
+}
+
+.daily-checkin-dialog.is-success {
+  background: var(--lime-highlight);
+  animation:
+    daily-checkin-enter 180ms ease-out,
+    daily-checkin-success 600ms ease-out;
+}
+
+.daily-checkin-dialog h2 {
+  margin: 4px 0 0;
+  font-family: var(--font-display);
+  font-size: 28px;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.daily-checkin-dialog p {
+  margin: 7px 0 0;
+  color: var(--text-muted);
+}
+
+.daily-checkin-mark {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+.daily-checkin-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-top: 2px;
+}
+
+.daily-checkin-dialog .entry-form-error {
+  grid-column: 1 / -1;
+}
+
+@keyframes daily-checkin-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes daily-checkin-success {
+  50% {
+    transform: translateY(0) scale(1.025);
+  }
+}
+
 .league-focus-heading {
   display: flex;
   align-items: flex-start;
@@ -3232,6 +3428,14 @@
     grid-template-columns: 1fr;
   }
 
+  .rallyo-progression-card {
+    grid-template-columns: 1fr;
+  }
+
+  .rallyo-progression-stats {
+    justify-content: space-between;
+  }
+
   .home-action-empty {
     grid-column: auto;
   }
@@ -3287,6 +3491,22 @@
   .pair-form,
   .league-focus {
     padding: 16px;
+  }
+
+  .global-league-panel {
+    padding: 16px;
+  }
+
+  .global-league-panel .league-focus-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+  }
+
+  .global-league-current-summary {
+    margin-top: 0;
+    width: fit-content;
+    text-align: left;
   }
 
   .player-task-tabs button {

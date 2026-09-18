@@ -36,6 +36,11 @@ export function getStoredAvatarId(): string {
   }
 }
 
+export function getLeagueAvatarId(playerId: string): string {
+  const hash = Array.from(playerId).reduce((value, character) => value + character.charCodeAt(0), 0)
+  return avatarOptions[hash % avatarOptions.length]?.id ?? 'neutral-01'
+}
+
 export function storeAvatarId(avatarId: string): void {
   try {
     window.localStorage.setItem(AVATAR_STORAGE_KEY, avatarId)

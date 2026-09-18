@@ -48,6 +48,10 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   bootstrap: () => request<AppBootstrap>('/api/app/me'),
+  progression: () => request<RallyoProgression>('/api/app/progression'),
+  claimDailyCheckin: () =>
+    request<DailyCheckinClaimResult>('/api/app/progression/daily-checkin', { method: 'POST' }),
+  globalLeague: () => request<GlobalLeague>('/api/app/league'),
   listCommunities: () =>
     request<{ readonly communities: readonly AppCommunity[] }>('/api/app/communities'),
   community: (communityId: string) =>
@@ -340,6 +344,7 @@ export type AppBootstrap = {
     readonly displayName: string
     readonly username: string | null
   }
+  readonly progression: RallyoProgression
   readonly wallet: { readonly linked: true; readonly address: string } | { readonly linked: false }
   readonly communities: readonly AppCommunity[]
   readonly adminCommunities: readonly {
@@ -351,6 +356,32 @@ export type AppBootstrap = {
     readonly walletLinking: boolean
     readonly globalLeague: boolean
   }
+}
+
+export type RallyoProgression = {
+  readonly totalXp: number
+  readonly todayClaimed: boolean
+  readonly nextEligibleAt: string
+  readonly globalRank: number | null
+}
+
+export type DailyCheckinClaimResult = {
+  readonly claimed: boolean
+  readonly xpAwarded: number
+  readonly progression: RallyoProgression
+}
+
+export type GlobalLeagueEntry = {
+  readonly playerId: string
+  readonly displayName: string
+  readonly totalXp: number
+  readonly rank: number
+  readonly isCurrentPlayer: boolean
+}
+
+export type GlobalLeague = {
+  readonly leaderboard: readonly GlobalLeagueEntry[]
+  readonly currentPlayer: GlobalLeagueEntry
 }
 
 export type AppAdminOverview = {

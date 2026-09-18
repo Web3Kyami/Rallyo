@@ -403,6 +403,7 @@ export function LeaderboardRow({
   name,
   rank,
   score,
+  scoreLabel = 'pts',
   tier,
 }: {
   readonly admin?: boolean
@@ -411,6 +412,7 @@ export function LeaderboardRow({
   readonly name: string
   readonly rank: number
   readonly score: number
+  readonly scoreLabel?: string
   readonly tier?: string
 }) {
   return (
@@ -422,7 +424,7 @@ export function LeaderboardRow({
         {tier ? <span>{tier}</span> : null}
       </div>
       <strong className="leaderboard-score">
-        {score.toLocaleString()} <span>pts</span>
+        {score.toLocaleString()} <span>{scoreLabel}</span>
       </strong>
     </div>
   )

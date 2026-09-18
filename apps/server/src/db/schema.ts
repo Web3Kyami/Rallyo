@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   check,
+  date,
   index,
   integer,
   jsonb,
@@ -66,6 +67,7 @@ export const scoreSourceType = pgEnum('score_source_type', [
   'SOCIAL_TASK',
   'MANUAL',
 ])
+export const rallyoXpEventType = pgEnum('rallyo_xp_event_type', ['DAILY_CHECKIN'])
 export const scrambleSource = pgEnum('scramble_source', ['GENERAL', 'PROJECT_BRAIN'])
 export const scrambleRoundStatus = pgEnum('scramble_round_status', [
   'LIVE',
@@ -118,6 +120,37 @@ export const players = pgTable('players', {
   createdAt: createdAt(),
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+export const rallyoXpEvents = pgTable(
+  'rallyo_xp_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    playerId: uuid('player_id')
+      .notNull()
+      .references(() => players.id, { onDelete: 'restrict' }),
+    amountXp: integer('amount_xp').notNull(),
+    eventType: rallyoXpEventType('event_type').notNull(),
+    reason: text('reason').notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    claimDate: date('claim_date'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  },
+  (table) => [
+    uniqueIndex('rallyo_xp_events_idempotency_key_unique').on(table.idempotencyKey),
+    uniqueIndex('rallyo_xp_events_player_type_day_unique').on(
+      table.playerId,
+      table.eventType,
+      table.claimDate,
+    ),
+    index('rallyo_xp_events_player_idx').on(table.playerId, table.occurredAt),
+    check('rallyo_xp_events_amount_positive', sql`${table.amountXp} > 0`),
+    check(
+      'rallyo_xp_events_daily_claim_date_required',
+      sql`${table.eventType} <> 'DAILY_CHECKIN' OR ${table.claimDate} IS NOT NULL`,
+    ),
+  ],
+)
 
 export const telegramIdentities = pgTable(
   'telegram_identities',
