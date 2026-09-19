@@ -5104,14 +5104,12 @@ export function helpMessage(isAdmin = false): string {
   const adminSection = isAdmin
     ? '\n\n<b>🔒 Admin tools</b>\n/settings · community status and controls\n/task_create · publish a social task\n/task_review · review submissions\n/award · award positive points with a reason'
     : ''
-  return `<b>ℹ️ Rallyo help</b>\n\n<b>Play</b>\n/me · your score, rank, and wallet status\n/tasks · active community tasks\n/task_submit · send a task URL or reference\n\n<b>Games</b>\nProject Quiz · answer the prompt, first correct wins\nWord Seek · solve the hidden word\nScramble · solve the mixed-up term\n\n<b>Account</b>\n/start · welcome and player actions\n/link · connect Nimiq for wallet-backed rewards\n/pair · get a one-time code to connect Telegram in Rallyo\n/help · show this guide${adminSection}`
+  return `<b>ℹ️ Rallyo help</b>\n\n<b>Play</b>\n/me · your score, rank, and wallet status\n/tasks · active community tasks\n/task_submit · send a task URL or reference\n\n<b>Games</b>\nProject Quiz · answer the prompt, first correct wins\nWord Seek · solve the hidden word\nScramble · solve the mixed-up term\n\n<b>Account</b>\n/start · welcome and player actions\n/pair · get a one-time code to connect Telegram in Rallyo\n/help · show this guide\n\nConnect Nimiq from the Rallyo app when you want wallet-backed identity or rewards.${adminSection}`
 }
 
 function playerKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
     .text('📊 My score', 'player:me')
-    .text('🔗 Link Nimiq', 'player:link')
-    .row()
     .text('🔐 Pair Rallyo', 'player:pair')
 }
 

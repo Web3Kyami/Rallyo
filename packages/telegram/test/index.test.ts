@@ -1,9 +1,22 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Update } from 'grammy/types'
 
-import { createRallyoBot } from '../src'
+import { RALLYO_ADMIN_COMMANDS, RALLYO_GROUP_COMMANDS, RALLYO_PRIVATE_COMMANDS, createRallyoBot } from '../src'
 
 describe('Rallyo grammY routing', () => {
+  it('publishes focused slash-command menus for private chats, groups, and group admins', () => {
+    expect(RALLYO_PRIVATE_COMMANDS.map(({ command }) => command)).toEqual([
+      'start',
+      'help',
+      'me',
+      'pair',
+    ])
+    expect(RALLYO_GROUP_COMMANDS.map(({ command }) => command)).toContain('tasks')
+    expect(RALLYO_GROUP_COMMANDS.map(({ command }) => command)).not.toContain('link')
+    expect(RALLYO_ADMIN_COMMANDS.map(({ command }) => command)).toContain('settings')
+    expect(RALLYO_ADMIN_COMMANDS.map(({ command }) => command)).toContain('task_review')
+  })
+
   it('delivers ordinary group text to the community text handler', async () => {
     const onGroupText = vi.fn(() => Promise.resolve())
     const handler = vi.fn(() => Promise.resolve())

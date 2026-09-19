@@ -4,6 +4,12 @@ Rallyo turns online communities into ongoing competitive social experiences. Com
 
 Rallyo is prepared for the Nimiq Mini Apps Competition Cycle II.
 
+## Live
+
+- App: https://rallyo.vercel.app
+- Telegram bot: https://t.me/Rallyo_gamebot
+- Source: https://github.com/Web3Kyami/Rallyo
+
 ## What Rallyo is
 
 Rallyo gives a community a shared competitive record across the places where its members already spend time.

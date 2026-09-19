@@ -1,4 +1,5 @@
 import { parseEnvironment } from '@rallyo/core'
+import { configureRallyoBotCommands } from '@rallyo/telegram'
 
 import { buildServer } from './app'
 import { createDatabase } from './db/client'
@@ -76,6 +77,12 @@ const app = buildServer({
 })
 
 await app.listen({ host: environment.NODE_ENV === 'production' ? '127.0.0.1' : '0.0.0.0', port })
+
+if (telegramRuntime) {
+  void configureRallyoBotCommands(telegramRuntime.bot).catch((error: unknown) => {
+    app.log.warn({ err: error }, 'Telegram command menu could not be refreshed')
+  })
+}
 
 let pollingStarted = false
 const stopClueRevealScheduler = telegramRuntime?.startClueRevealScheduler() ?? null
