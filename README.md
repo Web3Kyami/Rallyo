@@ -75,7 +75,7 @@ Supported proof types are:
 - Telegram screenshot or document
 - URL plus screenshot
 
-Players submit proof through the Telegram flow. A community admin reviews each submission manually. Approval creates exactly one positive `SOCIAL_TASK` score event. Rejection creates no points. Campaign limits, recurring daily limits, and cooldowns are enforced transactionally.
+Players submit proof through the Telegram flow. A community admin reviews each submission manually. Approval creates exactly one positive `SOCIAL_TASK` score event. Rejection creates no points. Campaign limits, recurring daily limits, and cooldowns are enforced transactionally. Player-facing task announcements use a reusable square Rallyo artwork, show the target link and human-readable deadline, and cache Telegram media file IDs to avoid unnecessary re-uploads.
 
 ## Nimiq integration
 
@@ -103,7 +103,7 @@ sequenceDiagram
     API-->>P: Open Rallyo Player app
 ```
 
-Wallet access is optional. Telegram players can enter through a short-lived session or pairing code, play, rank, and connect a wallet later. The app does not access private keys. Sensitive wallet actions stay inside the Nimiq Pay approval flow.
+Wallet access is optional. Telegram players can enter through a short-lived session or pairing code, play, rank, and connect a wallet later. Pairing codes are one-time and expire after ten minutes; issuing a replacement code invalidates the previous active code for that Telegram identity. The app does not access private keys. Sensitive wallet actions stay inside the Nimiq Pay approval flow.
 
 The repository also contains a reward state machine for season entitlements. It covers eligibility, wallet requirements, per-claim and daily caps, idempotent entitlement creation, claim-in-progress state, failures, sent state, and confirmation. The current app API exposes reward entitlements and status, while reward sending is intentionally not exposed through the player app API. Treat live payout wiring and sender configuration as deployment work that must be verified separately.
 
@@ -162,6 +162,7 @@ The current implementation includes several safeguards around live community sta
 - Transactional social task caps and manual approval.
 - Reward entitlement idempotency and explicit claim state transitions.
 - Server-side community and admin authorization for app and Telegram actions.
+- One-time Telegram pairing codes with expiry, replay protection, and replacement-code invalidation.
 - LLM use kept outside the live scoring path.
 
 ## Technology
@@ -236,9 +237,9 @@ npm run dev:server
 npm run dev:web
 ```
 
-For local Telegram polling, set `TELEGRAM_TRANSPORT=polling`. Webhook mode requires a public HTTPS endpoint and `TELEGRAM_WEBHOOK_SECRET`.
+For local Telegram polling, set `TELEGRAM_TRANSPORT=polling`. Webhook mode requires a public HTTPS endpoint and `TELEGRAM_WEBHOOK_SECRET`. Typed Quiz/Race answers depend on Telegram delivering ordinary group messages, so BotFather privacy mode must allow those messages or Rallyo must have sufficient group access.
 
-The current release candidate was verified against a disposable PostgreSQL database with migrations `0000` through `0015` applied. The serialized suite passed 26 test files and 145 tests. A test run without `DATABASE_URL` skips database integration files, so it is not equivalent to the complete verification command above.
+The current `main` was verified against a disposable PostgreSQL database with migrations `0000` through `0016` applied. The full PostgreSQL-backed suite passed 27 test files and 149 tests; focused Telegram and pairing coverage passed 25 tests. Typecheck, lint, format checks, and the production web build also passed. A test run without `DATABASE_URL` skips database integration files, so it is not equivalent to the complete verification command above.
 
 ## Open-source attribution
 
