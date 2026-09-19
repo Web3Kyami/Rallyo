@@ -215,9 +215,10 @@ describe('Telegram admin keyboards', () => {
       limit: 1,
       remaining: 1,
     })
-    expect(text).toContain('Reward · <b>+25 points</b>')
-    expect(text).toContain('Today · 1 submission remaining')
-    expect(text).toContain('Open reference')
+    expect(text).toContain('Reward: +25 pts each')
+    expect(text).toContain('You have 1 submission remaining today.')
+    expect(text).toContain('https://example.com/post')
+    expect(text).not.toContain('Open reference')
     expect(callbackData(socialTaskCardKeyboard(task))).toEqual([
       `player:task:${task.id}`,
       'player:tasks',

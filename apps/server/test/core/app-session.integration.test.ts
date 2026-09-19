@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { sql } from 'drizzle-orm'
+import { and, eq, gt, isNull, sql } from 'drizzle-orm'
 
 import { AppSessionError, AppSessionService } from '../../src/core/app-session-service'
 import { createDatabase } from '../../src/db/client'
@@ -114,5 +114,48 @@ describeDatabase('AppSessionService against PostgreSQL', () => {
         now: new Date(now.getTime() + 10 * 60_000 + 1),
       }),
     ).rejects.toThrow('invalid or expired')
+  })
+
+  it('replaces active Telegram pairing codes atomically, including concurrent requests', async () => {
+    const first = await service.issueTelegramPairingCode({
+      telegramIdentityId: ids.identity,
+      now,
+    })
+    const replacement = await service.issueTelegramPairingCode({
+      telegramIdentityId: ids.identity,
+      now: new Date(now.getTime() + 1_000),
+    })
+
+    const rowsAfterReplacement = await db
+      .select({
+        id: schema.telegramPairingCodes.id,
+        consumedAt: schema.telegramPairingCodes.consumedAt,
+      })
+      .from(schema.telegramPairingCodes)
+    expect(rowsAfterReplacement.find((row) => row.id === first.id)?.consumedAt).not.toBeNull()
+    expect(rowsAfterReplacement.find((row) => row.id === replacement.id)?.consumedAt).toBeNull()
+
+    await Promise.all([
+      service.issueTelegramPairingCode({
+        telegramIdentityId: ids.identity,
+        now: new Date(now.getTime() + 2_000),
+      }),
+      service.issueTelegramPairingCode({
+        telegramIdentityId: ids.identity,
+        now: new Date(now.getTime() + 3_000),
+      }),
+    ])
+
+    const active = await db
+      .select({ id: schema.telegramPairingCodes.id })
+      .from(schema.telegramPairingCodes)
+      .where(
+        and(
+          eq(schema.telegramPairingCodes.telegramIdentityId, ids.identity),
+          isNull(schema.telegramPairingCodes.consumedAt),
+          gt(schema.telegramPairingCodes.expiresAt, new Date(now.getTime() + 3_000)),
+        ),
+      )
+    expect(active).toHaveLength(1)
   })
 })

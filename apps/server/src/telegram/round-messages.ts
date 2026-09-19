@@ -46,11 +46,11 @@ export function renderRoundMessage(round: RoundMessageInput, now: Date = round.s
 
   if (presentationType === 'MCQ' || (round.presentation && presentation === 'multiple_choice')) {
     return {
-      text: `<b>${title}</b> · ${difficulty}\n\n<blockquote>${escapeHtml(round.prompt)}</blockquote>\n\n<i>Choose the correct answer. First correct wins.\n${timing}</i>`,
+      text: `<b>${title}</b> · ${difficulty}\n\n${escapeHtml(round.prompt)}\n\n<i>Choose the correct answer. First correct wins.</i>\n${timing}`,
       ...(media
         ? {
             media,
-            caption: `<b>${title}</b> · ${difficulty}\n\n<blockquote>${escapeHtml(round.prompt)}</blockquote>\n\n<i>Choose the correct answer. First correct wins.\n${timing}</i>`,
+            caption: `<b>${title}</b> · ${difficulty}\n\n${escapeHtml(round.prompt)}\n\n<i>Choose the correct answer. First correct wins.</i>\n${timing}`,
           }
         : {}),
       ...(round.options?.length ? { replyMarkup: quickQuizKeyboard(round.id, round.options) } : {}),
@@ -67,10 +67,10 @@ export function renderRoundMessage(round: RoundMessageInput, now: Date = round.s
       ? (round.hints ?? round.clueData?.clues ?? []).slice(0, clueNumber)
       : []
     const clueText = clues.length
-      ? `\n\n${clues.map((clue, index) => `Hint ${index + 1}\n&gt; ${escapeHtml(clue)}`).join('\n\n')}`
+      ? `\n\n${clues.map((clue, index) => `<i>Hint ${index + 1}</i>\n${escapeHtml(clue)}`).join('\n\n')}`
       : ''
     const points = projectQuizPoints(round, config?.hintsEnabled ? clueNumber : undefined)
-    const text = `<b>${title}</b> · ${difficulty}\n\n<blockquote>${escapeHtml(round.prompt)}</blockquote>${clueText}\n\n<i>Reply with your answer. First correct wins.\n⭐ ${points} pts · ⏱ ${roundDurationSeconds(round)}s</i>`
+    const text = `<b>${title}</b> · ${difficulty}\n\n${escapeHtml(round.prompt)}${clueText}\n\n<i>Reply with your answer. First correct wins.</i>\n⭐ ${points} pts · ⏱ ${roundDurationSeconds(round)}s`
 
     return {
       text,
@@ -81,14 +81,14 @@ export function renderRoundMessage(round: RoundMessageInput, now: Date = round.s
   switch (round.mode) {
     case 'QUICK':
       return {
-        text: `<b>🧠 PROJECT QUIZ / RACE</b> · ${difficulty}\n\n<blockquote>${escapeHtml(round.prompt)}</blockquote>\n\n<i>Choose the correct answer.\n⭐ ${round.basePoints} pts · ⏱ ${roundDurationSeconds(round)}s</i>`,
+        text: `<b>🧠 PROJECT QUIZ / RACE</b> · ${difficulty}\n\n${escapeHtml(round.prompt)}\n\n<i>Choose the correct answer.</i>\n⭐ ${round.basePoints} pts · ⏱ ${roundDurationSeconds(round)}s`,
         ...(round.options?.length
           ? { replyMarkup: quickQuizKeyboard(round.id, round.options) }
           : {}),
       }
     case 'FIRST_CORRECT':
       return {
-        text: `<b>🧠 PROJECT QUIZ / RACE</b> · ${difficulty}\n\n<blockquote>${escapeHtml(round.prompt)}</blockquote>\n\n<i>Reply with your answer. First correct wins.\n⭐ ${round.basePoints} pts · ⏱ ${roundDurationSeconds(round)}s</i>`,
+        text: `<b>🧠 PROJECT QUIZ / RACE</b> · ${difficulty}\n\n${escapeHtml(round.prompt)}\n\n<i>Reply with your answer. First correct wins.</i>\n⭐ ${round.basePoints} pts · ⏱ ${roundDurationSeconds(round)}s`,
       }
     case 'CLUE':
       return renderClueRoundMessage(round, clueNumberAt(round, now))
@@ -100,11 +100,11 @@ export function renderClueRoundMessage(round: RoundMessageInput, clueNumber: 1 |
   const visibleClues = clues.slice(0, clueNumber)
   const points = [30, 20, 10][clueNumber - 1]
   const clueText = visibleClues
-    .map((clue, index) => `Clue ${index + 1}\n> ${escapeHtml(clue)}`)
+    .map((clue, index) => `<i>Clue ${index + 1}</i>\n${escapeHtml(clue)}`)
     .join('\n\n')
 
   return {
-    text: `<b>🧠 PROJECT QUIZ / RACE · PROGRESSIVE CLUE</b>\n\n<blockquote>${escapeHtml(round.prompt)}</blockquote>\n\n${clueText}\n\n<i>⭐ ${points} pts available · ⏱ ${roundDurationSeconds(round)}s</i>`,
+    text: `<b>🧠 PROJECT QUIZ / RACE · PROGRESSIVE CLUE</b>\n\n${escapeHtml(round.prompt)}\n\n${clueText}\n\n<i>⭐ ${points} pts available · ⏱ ${roundDurationSeconds(round)}s</i>`,
   }
 }
 
@@ -113,7 +113,7 @@ export function renderClueRevealMessage(round: RoundMessageInput, clueNumber: 2 
   const points = projectQuizPoints(round, clueNumber)
 
   return {
-    text: `<b>💡 CLUE ${clueNumber}</b>\n\n&gt; ${escapeHtml(clue ?? '')}\n\n<i>${points} pts remaining</i>`,
+    text: `<b>💡 CLUE ${clueNumber}</b>\n\n${escapeHtml(clue ?? '')}\n\n<i>${points} pts remaining</i>`,
   }
 }
 
@@ -128,7 +128,7 @@ export function renderClueRoundAnswered(input: {
   const winner = input.winner
     ? `\n\n<b>${input.winnerMention ?? escapeHtml(input.winner)} got it first</b>`
     : ''
-  return `<b>🏆 CLUE ROUND · ANSWERED</b>\n\n${escapeHtml(input.prompt)}\n\n✅ <b>${escapeHtml(input.answer)}</b>${winner}\n\n<i>Answered on clue ${input.clueNumber}</i>\n✨ <b>+${input.points} pts</b>`
+  return `<b>✅ CORRECT · PROJECT QUIZ</b>\n\n${escapeHtml(input.prompt)}${winner}\n\nAnswer: <b>${escapeHtml(input.answer)}</b>\n\n<i>Answered on clue ${input.clueNumber}</i>\n<b>+${input.points} pts</b>`
 }
 
 export function renderFirstCorrectAnswered(input: {
@@ -138,7 +138,7 @@ export function renderFirstCorrectAnswered(input: {
   readonly winnerMention?: string
   readonly points: number
 }) {
-  return `<b>🏆 FIRST CORRECT · ANSWERED</b>\n\n${escapeHtml(input.prompt)}\n\n✅ <b>${escapeHtml(input.answer)}</b>\n\n<b>${input.winnerMention ?? escapeHtml(input.winner)} got it first</b>\n✨ <b>+${input.points} pts</b>`
+  return `<b>✅ CORRECT · PROJECT QUIZ</b>\n\n${escapeHtml(input.prompt)}\n\n${input.winnerMention ?? escapeHtml(input.winner)} got it first\n\nAnswer: <b>${escapeHtml(input.answer)}</b>\n\n<b>+${input.points} pts</b>`
 }
 
 export function renderProjectQuizAnswered(input: {
@@ -150,7 +150,7 @@ export function renderProjectQuizAnswered(input: {
   readonly rank?: number | null
 }) {
   const rank = input.rank ? `\n<i>Current rank: #${input.rank}</i>` : ''
-  return `<b>🏆 PROJECT QUIZ · CORRECT</b>\n\n${escapeHtml(input.prompt)}\n\n✅ <b>${escapeHtml(input.answer)}</b>\n\n<b>${input.winnerMention ?? escapeHtml(input.winner)} won</b>\n✨ <b>+${input.points} pts</b>${rank}`
+  return `<b>✅ CORRECT · PROJECT QUIZ</b>\n\n${escapeHtml(input.prompt)}\n\n${input.winnerMention ?? escapeHtml(input.winner)} got it first\n\nAnswer: <b>${escapeHtml(input.answer)}</b>\n\n<b>+${input.points} pts</b>${rank}`
 }
 
 export function quickQuizKeyboard(roundId: string, options: readonly QuestionOption[]) {
