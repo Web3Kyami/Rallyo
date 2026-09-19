@@ -530,7 +530,9 @@ export function CommunityCard({
   points,
   rank,
   season,
+  status,
   taskCue,
+  titleAction,
 }: {
   readonly action?: ReactNode
   readonly admin?: boolean
@@ -538,15 +540,18 @@ export function CommunityCard({
   readonly points: number
   readonly rank?: number | null
   readonly season: string
+  readonly status?: string
   readonly taskCue?: string
+  readonly titleAction?: ReactNode
 }) {
   return (
     <article className="community-card">
       <div className="community-card-heading">
         <span className="community-mark">{name.slice(0, 1).toUpperCase()}</span>
         <div>
-          <h3>{name}</h3>
+          <h3>{titleAction ?? name}</h3>
           <p>{season}</p>
+          {status ? <p className="community-card-status">{status}</p> : null}
         </div>
         {admin ? (
           <ToneBadge tone="accent" icon="shield">
@@ -604,7 +609,7 @@ export function StatusBanner({
 
 export function LoadingState({ label = 'Loading Rallyo' }: { readonly label?: string }) {
   return (
-    <div className="state-card" role="status" aria-live="polite">
+    <div className="state-card state-card-loading" role="status" aria-live="polite">
       <span className="state-mark state-mark-loading" aria-hidden="true" />
       <div>
         <strong>{label}</strong>

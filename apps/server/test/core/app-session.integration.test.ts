@@ -86,4 +86,33 @@ describeDatabase('AppSessionService against PostgreSQL', () => {
       }),
     ).rejects.toBeInstanceOf(AppSessionError)
   })
+
+  it('exchanges a Telegram pairing code into a session once', async () => {
+    const issued = await service.issueTelegramPairingCode({
+      telegramIdentityId: ids.identity,
+      now,
+    })
+    const exchanged = await service.exchangeTelegramPairingCode({ code: issued.code, now })
+
+    expect(exchanged.redirectPath).toBe('/app')
+    expect(await service.getSession(exchanged.token, now)).toMatchObject({
+      playerId: ids.player,
+      telegramIdentityId: ids.identity,
+      telegramUserId: 987654n,
+    })
+    await expect(service.exchangeTelegramPairingCode({ code: issued.code, now })).rejects.toThrow(
+      'invalid or expired',
+    )
+
+    const expired = await service.issueTelegramPairingCode({
+      telegramIdentityId: ids.identity,
+      now,
+    })
+    await expect(
+      service.exchangeTelegramPairingCode({
+        code: expired.code,
+        now: new Date(now.getTime() + 10 * 60_000 + 1),
+      }),
+    ).rejects.toThrow('invalid or expired')
+  })
 })

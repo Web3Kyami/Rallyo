@@ -36,6 +36,11 @@ export type ServerOptions = {
   readonly operatorSessionService?: OperatorSessionService
   readonly operatorConsoleService?: OperatorConsoleService
   readonly appSessionCookieSecure?: boolean
+  readonly telegramPairingSender?: (input: {
+    readonly telegramUserId: bigint
+    readonly code: string
+  }) => Promise<void>
+  readonly telegramBotUrl?: () => Promise<string | null>
 }
 
 export function buildServer(options: ServerOptions = {}) {
@@ -64,6 +69,10 @@ export function buildServer(options: ServerOptions = {}) {
     (options.database ? new OperatorConsoleService(options.database) : null)
   const secureSessionCookie =
     options.appSessionCookieSecure ?? process.env.NODE_ENV === 'production'
+  const telegramPairingAttempts = new Map<
+    string,
+    { readonly startedAt: number; readonly count: number }
+  >()
   const crossOriginSessionCookies = options.appCorsOrigin !== undefined
 
   if (appCorsOrigin) {
@@ -201,14 +210,86 @@ export function buildServer(options: ServerOptions = {}) {
         )
       }
     })
+
+    app.post<{ Body: { username?: string } }>(
+      '/api/app/telegram/request-pairing',
+      async (request, reply) => {
+        const username = request.body?.username
+        if (typeof username !== 'string' || username.trim().length === 0) {
+          return sendApiError(reply, 400, 'INVALID_REQUEST', 'A Telegram username is required.')
+        }
+        const rateLimitKey = `${request.ip}:${username.trim().toLocaleLowerCase('en-US')}`
+        if (isTelegramPairingRateLimited(telegramPairingAttempts, rateLimitKey)) {
+          return sendApiError(
+            reply,
+            429,
+            'TELEGRAM_PAIRING_RATE_LIMITED',
+            'Try again in a few minutes.',
+          )
+        }
+        try {
+          await appSessionService.requestTelegramPairing({
+            username,
+            ...(options.telegramPairingSender ? { send: options.telegramPairingSender } : {}),
+          })
+          return {
+            ok: true,
+            botUrl: (await options.telegramBotUrl?.()) ?? null,
+          }
+        } catch (error) {
+          if (error instanceof AppSessionError) {
+            return sendApiError(reply, 400, 'TELEGRAM_PAIRING_FAILED', error.message)
+          }
+          return sendApiError(
+            reply,
+            500,
+            'TELEGRAM_PAIRING_ERROR',
+            'Telegram pairing could not be started.',
+          )
+        }
+      },
+    )
+
+    app.post<{ Body: { code?: string } }>('/api/app/telegram/exchange', async (request, reply) => {
+      const code = request.body?.code
+      if (typeof code !== 'string' || code.trim().length === 0) {
+        return sendApiError(reply, 400, 'INVALID_REQUEST', 'A Telegram pairing code is required.')
+      }
+      try {
+        const exchanged = await appSessionService.exchangeTelegramPairingCode({
+          code: code.trim(),
+        })
+        reply.header(
+          'set-cookie',
+          sessionCookie(exchanged.token, secureSessionCookie, crossOriginSessionCookies),
+        )
+        return {
+          ok: true,
+          redirectPath: exchanged.redirectPath,
+          expiresAt: exchanged.expiresAt,
+        }
+      } catch (error) {
+        if (error instanceof AppSessionError) {
+          return sendApiError(reply, 400, 'TELEGRAM_PAIRING_FAILED', error.message)
+        }
+        return sendApiError(
+          reply,
+          500,
+          'TELEGRAM_PAIRING_ERROR',
+          'Telegram pairing could not be completed.',
+        )
+      }
+    })
   }
 
   if (appWalletAuthService) {
     const setWalletCors = (reply: { header: (name: string, value: string) => unknown }) => {
       if (walletLinkOrigin) {
         reply.header('access-control-allow-origin', walletLinkOrigin)
+        reply.header('access-control-allow-credentials', 'true')
         reply.header('access-control-allow-headers', 'content-type')
         reply.header('access-control-allow-methods', 'POST, OPTIONS')
+        reply.header('vary', 'Origin')
       }
     }
     app.options('/api/app/wallet/*', async (_request, reply) => {
@@ -1003,6 +1084,23 @@ function readCookie(cookieHeader: string | undefined, name: string): string | un
   } catch {
     return undefined
   }
+}
+
+function isTelegramPairingRateLimited(
+  attempts: Map<string, { readonly startedAt: number; readonly count: number }>,
+  key: string,
+  now = Date.now(),
+): boolean {
+  const windowMs = 10 * 60_000
+  const maxAttempts = 5
+  const current = attempts.get(key)
+  if (!current || now - current.startedAt >= windowMs) {
+    attempts.set(key, { startedAt: now, count: 1 })
+    return false
+  }
+  if (current.count >= maxAttempts) return true
+  attempts.set(key, { ...current, count: current.count + 1 })
+  return false
 }
 
 function sessionCookie(token: string, secure: boolean, crossOrigin: boolean): string {

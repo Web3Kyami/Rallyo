@@ -187,6 +187,7 @@ describe('server health', () => {
     })
     expect(challenge.statusCode).toBe(200)
     expect(challenge.headers['access-control-allow-origin']).toBe('https://pay.example')
+    expect(challenge.headers['access-control-allow-credentials']).toBe('true')
     expect(complete.statusCode).toBe(200)
     expect(complete.headers['set-cookie']).toContain('rallyo_session=wallet-session')
     await walletApp.close()
@@ -305,6 +306,57 @@ describe('server health', () => {
     expect(authenticated.statusCode).toBe(200)
     expect(authenticated.json()).toEqual({ totalXp: 0 })
     await sessionApp.close()
+  })
+
+  it('starts username pairing without exposing identity lookup results and exchanges a code into a session', async () => {
+    const sent: string[] = []
+    const pairingApp = buildServer({
+      appSessionService: {
+        requestTelegramPairing: ({ username }: { readonly username: string }) => {
+          sent.push(username)
+          return Promise.resolve({ sent: username !== '@UnknownPlayer' })
+        },
+        exchangeTelegramPairingCode: ({ code }: { readonly code: string }) =>
+          Promise.resolve({
+            token: `telegram-session-${code}`,
+            redirectPath: '/app',
+            expiresAt: new Date('2026-09-15T10:05:00.000Z'),
+          }),
+        exchangeCode: () => Promise.reject(new Error('not used')),
+        getSession: () => Promise.resolve(null),
+        revokeSession: () => Promise.resolve(),
+        pairTelegram: () => Promise.reject(new Error('not used')),
+      } as never,
+      telegramPairingSender: () => Promise.resolve(),
+      telegramBotUrl: () => Promise.resolve('https://t.me/rallyo_bot'),
+    })
+
+    const requested = await pairingApp.inject({
+      method: 'POST',
+      url: '/api/app/telegram/request-pairing',
+      payload: { username: '@KnownPlayer' },
+    })
+    expect(requested.statusCode).toBe(200)
+    expect(requested.json()).toEqual({ ok: true, botUrl: 'https://t.me/rallyo_bot' })
+    expect(sent).toEqual(['@KnownPlayer'])
+
+    const unknown = await pairingApp.inject({
+      method: 'POST',
+      url: '/api/app/telegram/request-pairing',
+      payload: { username: '@UnknownPlayer' },
+    })
+    expect(unknown.statusCode).toBe(200)
+    expect(unknown.json()).toEqual({ ok: true, botUrl: 'https://t.me/rallyo_bot' })
+
+    const exchanged = await pairingApp.inject({
+      method: 'POST',
+      url: '/api/app/telegram/exchange',
+      payload: { code: 'PAIR1234' },
+    })
+    expect(exchanged.statusCode).toBe(200)
+    expect(exchanged.json()).toMatchObject({ ok: true, redirectPath: '/app' })
+    expect(exchanged.headers['set-cookie']).toContain('rallyo_session=telegram-session-PAIR1234')
+    await pairingApp.close()
   })
 
   it('routes community admin game changes through the authenticated session', async () => {

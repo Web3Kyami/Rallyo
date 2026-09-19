@@ -1,13 +1,6 @@
 import { NavLink, Outlet, Link, useLocation } from 'react-router-dom'
 
-import {
-  Avatar,
-  Icon,
-  LoadingState,
-  RallyoBrand,
-  ToneBadge,
-  type IconName,
-} from '../components/design-system'
+import { Avatar, Icon, LoadingState, RallyoBrand, type IconName } from '../components/design-system'
 import { detectEnvironment } from '../platform/environment'
 import { useAppSession } from './session'
 import { PlayerEntryPage } from './player-views'
@@ -91,9 +84,9 @@ function PlayerShell() {
           </Link>
         ) : null}
         <div className="rail-footer">
-          <ToneBadge tone={session.data.wallet.linked ? 'success' : 'neutral'}>
-            {session.data.wallet.linked ? 'Wallet linked' : 'Wallet optional'}
-          </ToneBadge>
+          <Link className="text-button" to="/app/rewards">
+            Rewards
+          </Link>
           <button className="text-button" type="button" onClick={() => void session.logout()}>
             Sign out
           </button>

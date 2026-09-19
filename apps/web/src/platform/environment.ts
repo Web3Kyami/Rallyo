@@ -14,13 +14,10 @@ export function detectEnvironment(): RallyoEnvironment {
     language = 'en'
   }
 
+  const hasNimiqPayHost = Boolean(window.nimiqPay || window.nimiq)
   return {
-    host: language !== 'en' || isEmbeddedMiniApp() ? 'nimiq-pay' : 'browser',
+    host: hasNimiqPayHost ? 'nimiq-pay' : 'browser',
     language,
-    isWalletProviderAvailable: language !== 'en' || isEmbeddedMiniApp(),
+    isWalletProviderAvailable: hasNimiqPayHost,
   }
-}
-
-function isEmbeddedMiniApp(): boolean {
-  return window.parent !== window
 }

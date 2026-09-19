@@ -121,7 +121,7 @@ function AdminOverviewForCommunity({ communityId }: { readonly communityId: stri
     <PageFrame
       eyebrow="COMMUNITY CONTROL"
       title={overview.community.title}
-      detail="A calm operating view for the community arena. Live gameplay stays in Telegram."
+      detail="Community status, games, season, tasks, and content."
       action={
         <Link className="button button-primary" to={adminPath(communityId, 'games')}>
           Manage games <Icon name="arrow-right" size={17} />
@@ -132,7 +132,7 @@ function AdminOverviewForCommunity({ communityId }: { readonly communityId: stri
 
       {!active ? (
         <StatusBanner
-          detail="This community is not active. New game and task activity should remain unavailable until the server changes its community state."
+          detail="New game and task activity is unavailable until the community is active."
           icon="warning"
           title={`Community status: ${overview.community.status}`}
           tone="warning"
@@ -141,7 +141,7 @@ function AdminOverviewForCommunity({ communityId }: { readonly communityId: stri
 
       {!overview.activeSeason ? (
         <StatusBanner
-          detail="Games and point-awarding paths need an active season. The web app will not create one until a community-scoped season endpoint exists."
+          detail="No season is active. Season creation is not available here yet."
           icon="trophy"
           title="No active season"
           tone="warning"
@@ -159,8 +159,8 @@ function AdminOverviewForCommunity({ communityId }: { readonly communityId: stri
           <h2>{overview.activeSeason ?? 'No active season'}</h2>
           <p>
             {overview.activeSeason
-              ? 'Games, approved tasks, and positive awards contribute to this community season ledger.'
-              : 'Choose Season to inspect the current leaderboard and the unavailable lifecycle controls.'}
+              ? 'Games and approved tasks contribute to this community season.'
+              : 'Open Season to view the last available standings.'}
           </p>
           <Link className="button button-outline" to={adminPath(communityId, 'season')}>
             Open season <Icon name="arrow-right" size={17} />
@@ -179,7 +179,7 @@ function AdminOverviewForCommunity({ communityId }: { readonly communityId: stri
             <AdminStat label="Approved questions ready" value={overview.readyQuestionCount} />
             <AdminStat label="Messages recorded" value={overview.activity.messageCount} />
             <AdminStat label="Active chatters" value={overview.activity.activePlayers} />
-            <AdminStat label="Reward entitlements" value={overview.rewards.entitlementCount} />
+            <AdminStat label="Rewards issued" value={overview.rewards.entitlementCount} />
             <AdminStat label="Reward pool (Luna)" value={overview.rewards.totalAmountLuna} />
           </div>
         </section>
@@ -257,10 +257,7 @@ function AdminOverviewForCommunity({ communityId }: { readonly communityId: stri
           <div className="admin-schedule-value">
             {overview.nextRoundAt ? formatDateTime(overview.nextRoundAt) : 'No scheduled round'}
           </div>
-          <p className="admin-muted-copy">
-            The scheduler record is read from the community backend. Starting a round remains a
-            Telegram action.
-          </p>
+          <p className="admin-muted-copy">Starting a round remains a Telegram action.</p>
         </section>
       </div>
     </PageFrame>
@@ -278,19 +275,13 @@ export function AdminGamesPage({ communityId }: { readonly communityId: string }
     <PageFrame
       eyebrow="COMMUNITY CONTROL / GAMES"
       title="Games"
-      detail="Configure what players can start in this community. Every game remains a Telegram experience."
+      detail="Choose which Telegram games are available here."
       action={
         <Link className="button button-outline" to={adminPath(communityId)}>
           Overview <Icon name="arrow-right" size={17} />
         </Link>
       }
     >
-      <StatusBanner
-        detail="Enablement is saved by the community-scoped server route. Gameplay still starts and runs in Telegram."
-        icon="telegram"
-        title="Play stays in Telegram"
-        tone="info"
-      />
       <div className="admin-page-context">
         <span>{overview.community.title}</span>
         <span>Approved questions ready: {overview.readyQuestionCount.toLocaleString()}</span>
@@ -331,7 +322,7 @@ export function AdminSeasonPage({ communityId }: { readonly communityId: string 
     <PageFrame
       eyebrow="COMMUNITY CONTROL / SEASON"
       title="Season"
-      detail="Inspect the active community season and its shared leaderboard. Season mutations stay server-owned."
+      detail="Active season and community standings."
       action={
         <Link className="button button-outline" to={adminPath(communityId)}>
           Overview <Icon name="arrow-right" size={17} />
@@ -344,8 +335,8 @@ export function AdminSeasonPage({ communityId }: { readonly communityId: string 
           <h2>{data.activeSeason ?? 'No active season'}</h2>
           <p>
             {data.activeSeason
-              ? 'The leaderboard below combines eligible game and task score events for this community.'
-              : 'An active season is required before games or approved social work can award points.'}
+              ? 'The leaderboard combines game and task score events.'
+              : 'An active season is required before points can be awarded.'}
           </p>
         </div>
         <ToneBadge tone={data.activeSeason ? 'success' : 'warning'}>
@@ -356,17 +347,14 @@ export function AdminSeasonPage({ communityId }: { readonly communityId: string 
       <section className="admin-action-panel">
         <div>
           <SectionLabel>SEASON LIFECYCLE</SectionLabel>
-          <h2>Web controls are not connected</h2>
-          <p>
-            The current app API has no community-scoped create, start, or end route. These controls
-            stay disabled so the web app cannot bypass season rules or reward finalization.
-          </p>
+          <h2>Season actions are not available here yet</h2>
+          <p>These actions stay disabled until the server exposes the matching season routes.</p>
         </div>
         <div className="admin-action-stack">
-          <AdminUnavailableAction explanation="No web route exists for starting a community season.">
+          <AdminUnavailableAction explanation="No server route is available yet.">
             Start a season
           </AdminUnavailableAction>
-          <AdminUnavailableAction explanation="Ending a season can finalize rewards and needs an explicit server action.">
+          <AdminUnavailableAction explanation="Requires an explicit server action.">
             End current season
           </AdminUnavailableAction>
         </div>
@@ -432,7 +420,7 @@ export function AdminTasksPage({ communityId }: { readonly communityId: string }
     <PageFrame
       eyebrow="COMMUNITY CONTROL / SOCIAL TASKS"
       title="Social tasks"
-      detail="Create campaigns and review player submissions for this community. Points are awarded only by the server after approval."
+      detail="Create tasks and review player submissions."
       action={
         <Link className="button button-outline" to={adminPath(communityId)}>
           Overview <Icon name="arrow-right" size={17} />
@@ -441,14 +429,14 @@ export function AdminTasksPage({ communityId }: { readonly communityId: string }
     >
       {data.pendingReviewCount > 0 ? (
         <StatusBanner
-          detail={`${data.pendingReviewCount.toLocaleString()} pending submission${data.pendingReviewCount === 1 ? '' : 's'} are recorded for this community.`}
+          detail={`${data.pendingReviewCount.toLocaleString()} pending submission${data.pendingReviewCount === 1 ? '' : 's'}.`}
           icon="warning"
           title="Review queue needs attention"
           tone="warning"
         />
       ) : (
         <StatusBanner
-          detail="The server returned no pending task submissions for this community."
+          detail="The review queue is clear."
           icon="check"
           title="No pending reviews"
           tone="success"
@@ -459,10 +447,7 @@ export function AdminTasksPage({ communityId }: { readonly communityId: string }
         <div>
           <SectionLabel>TASK LIFECYCLE</SectionLabel>
           <h2>Create a campaign</h2>
-          <p>
-            New tasks are created through the same Social Task service used by Telegram. Expired
-            active tasks can be archived from this community scope.
-          </p>
+          <p>Create a task or archive expired tasks.</p>
         </div>
         <div className="admin-action-stack">
           <AdminCreateTaskForm
@@ -527,7 +512,7 @@ export function AdminTasksPage({ communityId }: { readonly communityId: string }
       </section>
 
       <StatusBanner
-        detail="Only currently active tasks and pending submissions are returned by this community read model."
+        detail="This view shows active tasks and pending submissions."
         icon="lock"
         title="Scoped active-task view"
         tone="info"
@@ -555,7 +540,7 @@ export function AdminContentPage({ communityId }: { readonly communityId: string
     <PageFrame
       eyebrow="COMMUNITY CONTROL / PROJECT CONTENT"
       title="Project content"
-      detail="See the content readiness that the current app API can verify. Live games only use approved server content."
+      detail="Approved content used by community games."
       action={
         <Link className="button button-outline" to={adminPath(communityId)}>
           Overview <Icon name="arrow-right" size={17} />
@@ -563,7 +548,7 @@ export function AdminContentPage({ communityId }: { readonly communityId: string
       }
     >
       <StatusBanner
-        detail="The web app will not create, approve, or edit content without the same scoped content service and authorization checks used by Telegram."
+        detail="Drafts can be added here. Approval remains server-owned."
         icon="lock"
         title="Approval remains server-owned"
         tone="info"
@@ -571,7 +556,7 @@ export function AdminContentPage({ communityId }: { readonly communityId: string
 
       <div className="admin-content-grid">
         <ContentReadinessCard
-          detail="Global and community-approved questions available to this community."
+          detail="Approved questions available here."
           label="Questions ready"
           value={overview.readyQuestionCount.toLocaleString()}
           tone={overview.readyQuestionCount > 0 ? 'success' : 'warning'}
@@ -579,8 +564,8 @@ export function AdminContentPage({ communityId }: { readonly communityId: string
         <ContentReadinessCard
           detail={
             content.status === 'ready'
-              ? 'Approved project vocabulary returned for this community.'
-              : 'Loading approved project vocabulary for this community.'
+              ? 'Approved words available here.'
+              : 'Loading approved words.'
           }
           label="Vocabulary"
           value={
@@ -593,7 +578,7 @@ export function AdminContentPage({ communityId }: { readonly communityId: string
           tone={content.status === 'ready' ? 'success' : 'neutral'}
         />
         <ContentReadinessCard
-          detail="Prepared image and media readiness is not returned by the current app API."
+          detail="Not available from the current service."
           label="Prepared media"
           value="Not exposed"
           tone="neutral"
@@ -603,11 +588,8 @@ export function AdminContentPage({ communityId }: { readonly communityId: string
       <section className="admin-action-panel">
         <div>
           <SectionLabel>PROJECT BRAIN</SectionLabel>
-          <h2>Build the approved content queue</h2>
-          <p>
-            Drafts are created through Question Bank and Word Seek services. Approval is a separate
-            server action, so live Telegram games only see approved records.
-          </p>
+          <h2>Add content drafts</h2>
+          <p>Live Telegram games use approved records only.</p>
         </div>
         <div className="admin-action-stack">
           <Button

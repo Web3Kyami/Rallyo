@@ -15,7 +15,9 @@ export class ApiError extends Error {
   }
 }
 
-const apiBase = import.meta.env.VITE_API_BASE_URL ?? window.location.origin
+const apiBase = import.meta.env.DEV
+  ? (import.meta.env.VITE_API_BASE_URL ?? window.location.origin)
+  : window.location.origin
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
@@ -154,6 +156,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ code }),
     }),
+  exchangeTelegramPairing: (code: string) =>
+    request<{ readonly redirectPath: string }>('/api/app/telegram/exchange', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+  requestTelegramPairing: (username: string) =>
+    request<{ readonly ok: true; readonly botUrl: string | null }>(
+      '/api/app/telegram/request-pairing',
+      {
+        method: 'POST',
+        body: JSON.stringify({ username }),
+      },
+    ),
   walletChallenge: (address: string) =>
     request<WalletAuthChallenge>('/api/app/wallet/challenge', {
       method: 'POST',

@@ -12,7 +12,6 @@ export function PublicHome() {
       <section className="landing-hero">
         <div className="landing-hero-copy">
           <div className="landing-kicker">
-            <span className="landing-kicker-index">01</span>
             <p className="eyebrow">TELEGRAM-FIRST COMPETITION</p>
           </div>
           <h1>
@@ -20,8 +19,7 @@ export function PublicHome() {
             <span>Keep the record.</span>
           </h1>
           <p className="landing-lede">
-            Play and engage in Telegram. Track competition, communities, tasks, ranks, rewards, and
-            identity in Rallyo.
+            Games, community tasks, seasons, and rewards in one Rallyo record.
           </p>
           <div className="landing-actions">
             <Link className="button button-primary" to="/app/open">
@@ -38,34 +36,19 @@ export function PublicHome() {
         <div className="landing-hero-visual">
           <div className="landing-visual-label">
             <RallyoBrand compact />
-            <span>ACTUAL APP ENTRY</span>
+            <span>COMMUNITY COMPETITION</span>
           </div>
-          <figure className="landing-screen">
-            <picture>
-              <source media="(max-width: 640px)" srcSet="/screens/rallyo-entry-mobile.png" />
-              <img
-                src="/screens/rallyo-entry-desktop.png"
-                alt="Rallyo player entry screen with Telegram pairing and Nimiq Pay sign-in"
-              />
-            </picture>
-            <figcaption>
-              <span className="landing-caption-index">01</span>
-              <span>One entry surface for browser, Telegram pairing, and Nimiq Pay.</span>
-            </figcaption>
-          </figure>
+          <LandingHeroBoard />
         </div>
       </section>
 
       <section className="landing-section" id="how-it-works">
         <div className="landing-section-intro">
           <div>
-            <p className="eyebrow">02 / THE MODEL</p>
+            <p className="eyebrow">THE MODEL</p>
             <h2>The live game is in Telegram. The momentum stays in Rallyo.</h2>
           </div>
-          <p>
-            Rallyo gives community participation a visible shape. The same Player identity carries
-            your records across the communities where you take part.
-          </p>
+          <p>Rallyo gives community participation a visible record across the places you play.</p>
         </div>
         <div className="landing-model">
           <div className="landing-game-list">
@@ -91,11 +74,16 @@ export function PublicHome() {
               icon="search"
               name="Word Seek"
             />
+            <LandingGame
+              accent="more"
+              detail="More community games are on the way."
+              icon="spark"
+              name="More coming soon"
+            />
           </div>
           <div className="landing-record-panel">
             <div className="landing-record-heading">
               <span className="eyebrow">TRACKING SURFACE</span>
-              <Icon name="arrow-up-right" size={20} />
             </div>
             <div className="landing-record-title">
               <span className="landing-record-mark">R</span>
@@ -114,27 +102,23 @@ export function PublicHome() {
       <section className="landing-section landing-loop-section">
         <div className="landing-section-intro landing-section-intro-loop">
           <div>
-            <p className="eyebrow">03 / THE LOOP</p>
+            <p className="eyebrow">THE LOOP</p>
             <h2>A simple loop for real participation.</h2>
           </div>
           <p>Each step leaves a useful record for the player and the community.</p>
         </div>
         <div className="loop-grid">
-          <LoopStep number="01" title="Play" detail="Answer enabled games in Telegram." />
-          <LoopStep number="02" title="Contribute" detail="Complete real community tasks." />
-          <LoopStep number="03" title="Climb" detail="Follow rank and points by season." />
-          <LoopStep
-            number="04"
-            title="Earn"
-            detail="Claim rewards when the community enables them."
-          />
+          <LoopStep title="Play" detail="Answer enabled games in Telegram." />
+          <LoopStep title="Contribute" detail="Complete real community tasks." />
+          <LoopStep title="Climb" detail="Follow rank and points by season." />
+          <LoopStep title="Earn" detail="Claim rewards when the community enables them." />
         </div>
       </section>
 
       <section className="landing-section landing-section-dark" id="for-communities">
         <div className="landing-section-intro landing-section-intro-dark">
           <div>
-            <p className="eyebrow">04 / FOR COMMUNITIES</p>
+            <p className="eyebrow">FOR COMMUNITIES</p>
             <h2>Give participation a place to go.</h2>
           </div>
           <p>
@@ -144,22 +128,18 @@ export function PublicHome() {
         </div>
         <div className="landing-admin-list">
           <AdminRow
-            index="01"
             title="Enable the games your community wants to play."
             detail="Quiz / Race · Scramble · Word Seek"
           />
           <AdminRow
-            index="02"
             title="Run seasons with a clear community leaderboard."
             detail="Community-scoped points and ranks"
           />
           <AdminRow
-            index="03"
             title="Publish contribution tasks with reviewable proof."
             detail="Social tasks and manual review"
           />
           <AdminRow
-            index="04"
             title="Keep wallet-backed rewards optional."
             detail="Nimiq when it adds something"
           />
@@ -168,12 +148,11 @@ export function PublicHome() {
 
       <section className="landing-section landing-nimiq-section">
         <div className="landing-nimiq-copy">
-          <p className="eyebrow">05 / NIMIQ PAY</p>
+          <p className="eyebrow">NIMIQ PAY</p>
           <h2>Wallet when it helps. Rallyo always comes first.</h2>
           <p>
-            Rallyo runs inside Nimiq Pay for wallet-backed entry and reward actions. Telegram
-            players can participate, rank, and connect a wallet later. No email or password is
-            needed for normal player entry.
+            Rallyo runs inside Nimiq Pay for wallet entry and reward actions. Telegram players can
+            join without a wallet.
           </p>
           <Link className="button button-primary" to="/app/open">
             Open Rallyo
@@ -191,12 +170,38 @@ export function PublicHome() {
       </section>
 
       <section className="landing-final-cta">
-        <p className="eyebrow">06 / YOUR TURN</p>
+        <p className="eyebrow">YOUR TURN</p>
         <h2>Join the record your community is building.</h2>
         <Link className="button button-primary" to="/app/open">
           Open Rallyo
         </Link>
       </section>
+    </div>
+  )
+}
+
+function LandingHeroBoard() {
+  return (
+    <div className="landing-hero-board">
+      <div className="landing-hero-board-top">
+        <span className="eyebrow">RALLYO RECORD</span>
+        <span>PLAY SURFACE: TELEGRAM</span>
+      </div>
+      <div className="landing-hero-board-title">
+        <strong>Community competition</strong>
+        <span>One record across every rally.</span>
+      </div>
+      <div className="landing-hero-board-games" aria-label="Rallyo games">
+        <span className="landing-hero-board-game landing-hero-board-game-quiz">Quiz / Race</span>
+        <span className="landing-hero-board-game landing-hero-board-game-scramble">Scramble</span>
+        <span className="landing-hero-board-game landing-hero-board-game-word-seek">Word Seek</span>
+      </div>
+      <div className="landing-hero-board-loop">
+        <span>Play</span>
+        <span>Contribute</span>
+        <span>Climb</span>
+        <span>Earn</span>
+      </div>
     </div>
   )
 }
@@ -207,9 +212,9 @@ function LandingGame({
   icon,
   name,
 }: {
-  readonly accent: 'quiz' | 'scramble' | 'word-seek'
+  readonly accent: 'quiz' | 'scramble' | 'word-seek' | 'more'
   readonly detail: string
-  readonly icon: 'list' | 'game' | 'search'
+  readonly icon: 'list' | 'game' | 'search' | 'spark'
   readonly name: string
 }) {
   return (
@@ -221,9 +226,6 @@ function LandingGame({
         <strong>{name}</strong>
         <p>{detail}</p>
       </div>
-      <span className="landing-game-arrow" aria-hidden="true">
-        ↗
-      </span>
     </div>
   )
 }
@@ -237,18 +239,9 @@ function RecordLine({ detail, label }: { readonly detail: string; readonly label
   )
 }
 
-function AdminRow({
-  detail,
-  index,
-  title,
-}: {
-  readonly detail: string
-  readonly index: string
-  readonly title: string
-}) {
+function AdminRow({ detail, title }: { readonly detail: string; readonly title: string }) {
   return (
     <div className="landing-admin-row">
-      <span>{index}</span>
       <strong>{title}</strong>
       <span>{detail}</span>
     </div>
@@ -289,10 +282,7 @@ export function OpenSessionPage() {
           <RallyoBrand />
           <p className="eyebrow">ONE-TIME HANDOFF</p>
           <h1>Opening your Rallyo session.</h1>
-          <p>
-            This link is being exchanged for a secure app session. Wallet access is not part of this
-            login.
-          </p>
+          <p>Getting your Rallyo record ready.</p>
         </div>
       </div>
     )
@@ -309,8 +299,15 @@ export function OpenSessionPage() {
             <Link className="button button-primary" to="/app/open">
               Enter a pairing code
             </Link>
+            <button
+              className="button button-outline"
+              type="button"
+              onClick={() => window.location.reload()}
+            >
+              Try again
+            </button>
             <Link className="button button-outline" to="/">
-              Return to Rallyo
+              Return home
             </Link>
           </div>
         </div>
@@ -530,18 +527,9 @@ function PreviewTitle({ label, title }: { readonly label: string; readonly title
   )
 }
 
-function LoopStep({
-  number,
-  title,
-  detail,
-}: {
-  readonly number: string
-  readonly title: string
-  readonly detail: string
-}) {
+function LoopStep({ title, detail }: { readonly title: string; readonly detail: string }) {
   return (
     <div className="loop-step">
-      <span>{number}</span>
       <strong>{title}</strong>
       <p>{detail}</p>
     </div>

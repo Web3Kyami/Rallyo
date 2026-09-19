@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 
-import { and, eq, gt, isNull } from 'drizzle-orm'
+import { and, eq, gt, isNull, sql } from 'drizzle-orm'
 
 import type { RallyoDatabase } from '../db/client'
 import * as schema from '../db/schema'
@@ -106,6 +106,86 @@ export class AppSessionService {
     readonly now?: Date
   }) {
     return issueTelegramPairingCode(this.database, input)
+  }
+
+  async requestTelegramPairing(input: {
+    readonly username: string
+    readonly send?: (input: {
+      readonly telegramUserId: bigint
+      readonly code: string
+    }) => Promise<void>
+    readonly now?: Date
+  }) {
+    const username = normalizeTelegramUsername(input.username)
+    if (!username) throw new AppSessionError('Enter a valid Telegram username.')
+
+    const [identity] = await this.database
+      .select({
+        id: schema.telegramIdentities.id,
+        telegramUserId: schema.telegramIdentities.telegramUserId,
+      })
+      .from(schema.telegramIdentities)
+      .where(sql`lower(${schema.telegramIdentities.username}) = ${username}`)
+      .limit(1)
+
+    if (!identity || !input.send) return { sent: false as const }
+
+    const issued = await this.issueTelegramPairingCode({
+      telegramIdentityId: identity.id,
+      ...(input.now ? { now: input.now } : {}),
+    })
+    try {
+      await input.send({ telegramUserId: identity.telegramUserId, code: issued.code })
+    } catch {
+      return { sent: false as const }
+    }
+    return { sent: true as const, expiresAt: issued.expiresAt }
+  }
+
+  async exchangeTelegramPairingCode(input: {
+    readonly code: string
+    readonly now?: Date
+  }): Promise<AppSessionIssued> {
+    const now = input.now ?? new Date()
+    if (!input.code || input.code.length > 100) {
+      throw new AppSessionError('Telegram pairing code is invalid or expired.')
+    }
+
+    return this.database.transaction(async (tx) => {
+      const [pairing] = await tx
+        .select()
+        .from(schema.telegramPairingCodes)
+        .where(
+          and(
+            eq(schema.telegramPairingCodes.codeHash, hash(input.code)),
+            isNull(schema.telegramPairingCodes.consumedAt),
+            gt(schema.telegramPairingCodes.expiresAt, now),
+          ),
+        )
+        .for('update')
+      if (!pairing) throw new AppSessionError('Telegram pairing code is invalid or expired.')
+
+      const [identity] = await tx
+        .select({
+          id: schema.telegramIdentities.id,
+          playerId: schema.telegramIdentities.playerId,
+        })
+        .from(schema.telegramIdentities)
+        .where(eq(schema.telegramIdentities.id, pairing.telegramIdentityId))
+        .for('update')
+      if (!identity) throw new AppSessionError('Telegram identity no longer exists.')
+
+      const issued = await createAppSession(tx, {
+        playerId: identity.playerId,
+        telegramIdentityId: identity.id,
+        now,
+      })
+      await tx
+        .update(schema.telegramPairingCodes)
+        .set({ consumedAt: now })
+        .where(eq(schema.telegramPairingCodes.id, pairing.id))
+      return issued
+    })
   }
 
   async exchangeCode(input: {
@@ -368,6 +448,10 @@ function randomToken(): string {
 
 function randomPairingCode(): string {
   return randomBytes(5).toString('base64url').slice(0, 8).toUpperCase()
+}
+
+function normalizeTelegramUsername(value: string): string {
+  return value.trim().replace(/^@/u, '').toLocaleLowerCase('en-US')
 }
 
 function hash(value: string): string {

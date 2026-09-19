@@ -612,6 +612,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.community-card-title-link {
+  text-decoration: none;
+}
+.community-card-status {
+  color: var(--success) !important;
+  font-weight: 700;
+}
 .community-card-stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -739,6 +746,23 @@
   border-color: var(--danger);
   color: var(--danger);
 }
+.state-card-loading {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 24px 16px;
+  border: 0;
+  background: transparent;
+  text-align: center;
+}
+.state-card-loading .state-mark {
+  border-color: var(--ink);
+  border-right-color: transparent;
+  animation: rallyo-spin 700ms linear infinite;
+}
+.state-card-loading p {
+  display: none;
+}
 .state-action {
   margin-top: 10px;
 }
@@ -844,13 +868,6 @@
   align-items: center;
   gap: 12px;
 }
-.landing-kicker-index,
-.landing-caption-index {
-  color: var(--rallyo);
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 700;
-}
 .landing-kicker .eyebrow {
   color: var(--ink);
 }
@@ -910,48 +927,85 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
-.landing-screen {
+.landing-hero-board {
   position: relative;
-  margin: 0;
-  overflow: hidden;
+  display: grid;
+  gap: 28px;
+  padding: 28px;
   border: 2px solid var(--ink);
   border-radius: var(--radius-panel);
   background: var(--surface);
   box-shadow: var(--shadow-primary);
   transform: rotate(1.2deg);
 }
-.landing-screen::before {
-  position: absolute;
-  top: 12px;
-  right: 16px;
-  z-index: 1;
-  width: 68px;
-  height: 18px;
-  border: 2px solid var(--ink);
-  background: var(--lime-highlight);
-  content: '';
-  transform: rotate(-3deg);
-}
-.landing-screen picture,
-.landing-screen img {
-  display: block;
-  width: 100%;
-}
-.landing-screen img {
-  height: auto;
-}
-.landing-screen figcaption {
+.landing-hero-board-top,
+.landing-hero-board-title,
+.landing-hero-board-loop {
   display: flex;
-  align-items: baseline;
-  gap: 12px;
-  padding: 13px 16px 15px;
-  border-top: 2px solid var(--ink);
-  background: var(--surface);
-  color: var(--text-muted);
-  font-size: 14px;
+  justify-content: space-between;
+  gap: 16px;
 }
-.landing-caption-index {
-  color: var(--ink);
+.landing-hero-board-top {
+  align-items: center;
+  padding-bottom: 14px;
+  border-bottom: 2px solid var(--ink);
+}
+.landing-hero-board-top > span:last-child {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.landing-hero-board-title {
+  align-items: end;
+}
+.landing-hero-board-title strong {
+  max-width: 300px;
+  font-family: var(--font-display);
+  font-size: clamp(30px, 4vw, 48px);
+  letter-spacing: -0.06em;
+  line-height: 0.95;
+}
+.landing-hero-board-title span {
+  max-width: 150px;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1.45;
+}
+.landing-hero-board-games {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.landing-hero-board-game {
+  min-height: 96px;
+  padding: 12px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-control);
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 800;
+}
+.landing-hero-board-game-quiz {
+  background: var(--quiz);
+}
+.landing-hero-board-game-scramble {
+  background: var(--scramble);
+}
+.landing-hero-board-game-word-seek {
+  background: var(--word-seek);
+}
+.landing-hero-board-loop {
+  align-items: center;
+  padding-top: 16px;
+  border-top: 2px solid var(--ink);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 .landing-section {
   padding: 96px 0;
@@ -1005,7 +1059,7 @@
 }
 .landing-game {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
+  grid-template-columns: 44px minmax(0, 1fr);
   align-items: center;
   gap: 16px;
   padding: 18px 0;
@@ -1039,9 +1093,8 @@
   color: var(--text-muted);
   font-size: 14px;
 }
-.landing-game-arrow {
-  font-size: 24px;
-  font-weight: 700;
+.landing-game-more .landing-game-icon {
+  background: var(--lime-highlight);
 }
 .landing-record-panel {
   padding: 20px;
@@ -1152,7 +1205,7 @@
 }
 .landing-admin-row {
   display: grid;
-  grid-template-columns: 80px 1fr 180px;
+  grid-template-columns: 1fr 180px;
   gap: 20px;
   align-items: center;
   padding: 18px 0;
@@ -1164,7 +1217,6 @@
   font-size: 17px;
   line-height: 1.35;
 }
-.landing-admin-row span:first-child,
 .landing-admin-row span:last-child {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -2067,10 +2119,10 @@
     grid-template-columns: repeat(2, 1fr);
   }
   .landing-admin-row {
-    grid-template-columns: 46px 1fr;
+    grid-template-columns: 1fr;
   }
   .landing-admin-row span:last-child {
-    grid-column: 2;
+    grid-column: 1;
   }
   .showcase-viewports {
     grid-template-columns: 1fr;
@@ -2134,15 +2186,11 @@
   .landing-section h2 {
     font-size: clamp(34px, 10vw, 52px);
   }
-  .landing-screen {
+  .landing-hero-board {
     transform: rotate(0.8deg);
   }
-  .landing-screen figcaption {
-    align-items: flex-start;
-    font-size: 13px;
-  }
   .landing-game {
-    grid-template-columns: 40px minmax(0, 1fr) auto;
+    grid-template-columns: 40px minmax(0, 1fr);
     gap: 12px;
   }
   .landing-game strong {
@@ -2166,9 +2214,6 @@
   .loop-step {
     min-height: 160px;
     padding: 14px;
-  }
-  .loop-step > span {
-    margin-bottom: 30px;
   }
   .identity-banner {
     grid-template-columns: auto minmax(0, 1fr);
@@ -2243,7 +2288,7 @@
 }
 
 .player-entry-card > .rallyo-brand {
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 }
 
 .player-entry-eyebrow {
@@ -2253,6 +2298,13 @@
 .player-entry-card h1 {
   max-width: 540px;
   margin-bottom: 16px;
+}
+.player-entry-card h2 {
+  margin: 2px 0 0;
+  font-family: var(--font-display);
+  font-size: 28px;
+  letter-spacing: -0.05em;
+  line-height: 1;
 }
 
 .entry-intro {
@@ -2276,6 +2328,22 @@
 .entry-primary-method.is-wallet {
   background: var(--rallyo-soft);
   box-shadow: var(--shadow-primary);
+}
+
+.entry-telegram-step {
+  margin-top: 24px;
+}
+
+.entry-step-copy {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.entry-step-link {
+  justify-self: start;
+  margin-top: 4px;
 }
 
 .entry-secondary-method {
@@ -2317,6 +2385,13 @@
   gap: 8px;
 }
 
+.wallet-entry-unavailable {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
 .entry-form-error {
   margin: 2px 0 0;
   color: var(--danger);
@@ -2330,12 +2405,10 @@
   border-top: 1px solid var(--border-quiet);
 }
 
-.player-identity-panel,
 .profile-hero,
 .profile-method,
 .wallet-summary,
 .community-detail-header,
-.home-current-record,
 .profile-community-summary,
 .rewards-section,
 .pair-explainer,
@@ -2437,7 +2510,6 @@
   line-height: 1;
 }
 
-.player-identity-panel p,
 .profile-hero p,
 .profile-method p,
 .wallet-summary p,
@@ -2448,23 +2520,8 @@
   color: var(--text-muted);
 }
 
-.identity-methods {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 12px;
-}
-
-.status-banner,
-.player-identity-panel + .status-banner,
-.home-current-record + .status-banner {
+.status-banner {
   margin-top: 16px;
-}
-
-.home-current-record {
-  margin-top: 16px;
-  padding: 20px;
-  background: var(--rallyo-soft);
 }
 
 .home-section {
@@ -2499,92 +2556,19 @@
   gap: 8px;
 }
 
-.home-current-record > .rank-block {
-  margin-top: 20px;
-}
-
-.home-action-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.home-action-panel {
-  display: grid;
-  min-height: 112px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 16px;
-  border: 2px solid var(--ink);
-  border-radius: var(--radius-card);
-  background: var(--surface);
-}
-
-.home-action-link {
-  color: var(--ink);
-  text-decoration: none;
-}
-
-.home-action-link:hover {
-  background: var(--surface-muted);
-}
-
-.home-action-link strong,
-.home-action-link small {
-  display: block;
-}
-
-.home-action-link strong {
-  font-size: 17px;
-}
-
-.home-action-link small,
-.home-action-empty span {
-  margin-top: 5px;
-  color: var(--text-muted);
-  font-size: 14px;
-  line-height: 1.4;
-}
-
-.home-action-icon {
-  display: grid;
-  width: 44px;
-  height: 44px;
-  place-items: center;
-  border: 2px solid var(--ink);
-  border-radius: var(--radius-control);
-}
-
-.home-action-icon-task {
-  background: var(--quiz);
-}
-
-.home-action-icon-reward {
-  background: var(--scramble);
-}
-
-.home-action-empty {
-  display: block;
-  min-height: 0;
-  grid-column: 1 / -1;
-}
-
 .loading-lines {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  justify-items: center;
   align-items: center;
-  column-gap: 10px;
-  padding: 18px;
-  border: 2px dashed var(--border-muted);
-  border-radius: var(--radius-card);
-  background: var(--surface-muted);
+  gap: 8px;
+  padding: 24px 16px;
+  color: var(--text-muted);
+  text-align: center;
 }
 
 .loading-lines-mark {
   width: 16px;
   height: 16px;
-  grid-row: span 2;
   border: 2px solid var(--ink);
   border-right-color: transparent;
   border-radius: 50%;
@@ -2600,10 +2584,8 @@
   font-size: 14px;
 }
 
-.game-strip {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+.home-task-summary {
+  padding-top: 4px;
 }
 
 .coming-soon-note {
@@ -2661,6 +2643,11 @@
 
 .home-wallet-panel p {
   margin: 10px 0 16px;
+  color: var(--text-muted);
+}
+
+.home-task-summary p {
+  margin: 0;
   color: var(--text-muted);
 }
 
@@ -3360,14 +3347,9 @@
 }
 
 @media (max-width: 900px) {
-  .home-lower-grid,
   .task-detail-layout,
   .pair-layout,
   .league-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .game-strip {
     grid-template-columns: 1fr;
   }
 
@@ -3398,12 +3380,10 @@
     margin-bottom: 22px;
   }
 
-  .player-identity-panel,
   .profile-hero {
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .player-identity-panel > .button,
   .profile-hero > .button {
     grid-column: 1 / -1;
     width: 100%;

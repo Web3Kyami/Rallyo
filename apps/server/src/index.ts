@@ -24,6 +24,26 @@ const telegramRuntime =
       })
     : null
 
+const telegramPairingSender = telegramRuntime
+  ? async (input: { readonly telegramUserId: bigint; readonly code: string }) => {
+      await telegramRuntime.bot.api.sendMessage(
+        input.telegramUserId.toString(),
+        `<b>RALLYO PAIRING CODE</b>\n\n<code>${input.code}</code>\n\nEnter this code in Rallyo. It expires in ten minutes and can be used once.`,
+        { parse_mode: 'HTML' },
+      )
+    }
+  : undefined
+let telegramBotUrlPromise: Promise<string | null> | undefined
+const telegramBotUrl = telegramRuntime
+  ? async () => {
+      telegramBotUrlPromise ??= telegramRuntime.bot
+        .init()
+        .then(() => `https://t.me/${telegramRuntime.bot.botInfo.username}`)
+        .catch(() => null)
+      return telegramBotUrlPromise
+    }
+  : undefined
+
 if (telegramRuntime && telegramTransport === 'webhook' && !environment.TELEGRAM_WEBHOOK_SECRET) {
   throw new Error('TELEGRAM_WEBHOOK_SECRET is required when TELEGRAM_TRANSPORT=webhook.')
 }
@@ -51,6 +71,8 @@ const app = buildServer({
   ...(environment.OPERATOR_ACCESS_KEY
     ? { operatorAccessKey: environment.OPERATOR_ACCESS_KEY }
     : {}),
+  ...(telegramPairingSender ? { telegramPairingSender } : {}),
+  ...(telegramBotUrl ? { telegramBotUrl } : {}),
 })
 
 await app.listen({ host: environment.NODE_ENV === 'production' ? '127.0.0.1' : '0.0.0.0', port })

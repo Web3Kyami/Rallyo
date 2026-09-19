@@ -216,6 +216,8 @@ cp .env.example .env
 
 Set local values in `.env`. At minimum, a server connected to PostgreSQL needs `DATABASE_URL`; Telegram testing needs `TELEGRAM_BOT_TOKEN`; and the web session flow needs `SESSION_SECRET`. `OPERATOR_ACCESS_KEY` is optional and protects the operator console. Keep all real tokens, database URLs, signing keys, and wallet credentials out of Git.
 
+For a split web and API deployment, set `VITE_API_BASE_URL` in the web build environment to the public API origin. The repository intentionally does not commit an infrastructure-specific API hostname.
+
 Run the schema and checks against a disposable or test database:
 
 ```bash

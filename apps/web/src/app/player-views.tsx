@@ -123,8 +123,12 @@ export function PlayerEntryPage() {
   const session = useAppSession()
   const navigate = useNavigate()
   const [code, setCode] = useState('')
-  const [state, setState] = useState<'idle' | 'exchanging' | 'error'>('idle')
+  const [username, setUsername] = useState('')
+  const [telegramStage, setTelegramStage] = useState<'choice' | 'username' | 'code'>('choice')
+  const [state, setState] = useState<'idle' | 'requesting' | 'exchanging' | 'error'>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [telegramMessage, setTelegramMessage] = useState<string | null>(null)
+  const [botUrl, setBotUrl] = useState<string | null>(null)
 
   if (session.status === 'ready') return <Navigate replace to="/app" />
 
@@ -133,13 +137,50 @@ export function PlayerEntryPage() {
     setState('exchanging')
     setError(null)
     try {
-      const result = await api.exchangeSession(code.trim())
+      const result = await api.exchangeTelegramPairing(code.trim())
       await session.refresh()
       void navigate(result.redirectPath, { replace: true })
     } catch (reason: unknown) {
       setState('error')
-      setError(reason instanceof ApiError ? reason.message : 'The Rallyo code could not be used.')
+      setError(
+        reason instanceof ApiError
+          ? reason.message
+          : 'The Telegram pairing code could not be used.',
+      )
     }
+  }
+
+  const requestPairing = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setState('requesting')
+    setError(null)
+    try {
+      const result = await api.requestTelegramPairing(username.trim())
+      setBotUrl(result.botUrl)
+      setTelegramMessage(
+        'If Rallyo knows this account, a pairing code was sent in Telegram. If no code arrives, start Rallyo Bot first, then try again.',
+      )
+      setTelegramStage('code')
+      setState('idle')
+    } catch (reason: unknown) {
+      setState('error')
+      setError(
+        reason instanceof ApiError ? reason.message : 'Telegram pairing could not be started.',
+      )
+    }
+  }
+
+  const openTelegram = () => {
+    setTelegramStage('username')
+    setState('idle')
+    setError(null)
+  }
+
+  const enterCode = () => {
+    setTelegramStage('code')
+    setState('idle')
+    setError(null)
+    setTelegramMessage('Enter the one-time code from Rallyo Bot.')
   }
 
   const onWalletAuthenticated = async (redirectPath: string) => {
@@ -154,30 +195,78 @@ export function PlayerEntryPage() {
     <div className="entry-gate player-entry-gate">
       <div className="entry-card player-entry-card">
         <RallyoBrand />
-        <p className="eyebrow player-entry-eyebrow">
-          {environment.host === 'nimiq-pay' ? 'NIMIQ PAY ENTRY' : 'RALLYO PLAYER APP'}
-        </p>
-        <h1>Compete. Contribute. Climb.</h1>
-        <p className="entry-intro">
-          Keep one Player record across the communities where you take part. Wallet access is
-          optional for play and ranking.
-        </p>
+        <h1>Play. Compete. Contribute.</h1>
+        <p className="entry-intro">Games, tasks, seasons, and rewards in one Rallyo record.</p>
 
-        <div
-          className={`entry-primary-method${environment.host === 'nimiq-pay' ? ' is-wallet' : ''}`}
-        >
-          {environment.host === 'nimiq-pay' ? (
-            <>
-              <SectionLabel>FASTEST HERE</SectionLabel>
-              <WalletSignInButton enabled onAuthenticated={onWalletAuthenticated} />
-              <p className="entry-note">
-                Your wallet is enough to enter. Connect Telegram after you arrive.
+        {telegramStage === 'choice' ? (
+          <>
+            <div className="entry-primary-method is-wallet">
+              <SectionLabel>CONNECT NIMIQ PAY</SectionLabel>
+              {environment.isWalletProviderAvailable ? (
+                <WalletSignInButton enabled onAuthenticated={onWalletAuthenticated} />
+              ) : (
+                <p className="entry-note wallet-entry-unavailable">
+                  Wallet connection is available inside Nimiq Pay.
+                </p>
+              )}
+            </div>
+            <div className="entry-secondary-method">
+              <SectionLabel>CONNECT TELEGRAM</SectionLabel>
+              <Button type="button" variant="secondary" icon="telegram" onClick={openTelegram}>
+                Connect Telegram
+              </Button>
+            </div>
+          </>
+        ) : null}
+
+        {telegramStage === 'username' ? (
+          <div className="entry-primary-method entry-telegram-step">
+            <SectionLabel>CONNECT TELEGRAM</SectionLabel>
+            <h2>Find your Telegram account</h2>
+            <p className="entry-step-copy">Use the username you use with Rallyo Bot.</p>
+            <form className="entry-code-form" onSubmit={(event) => void requestPairing(event)}>
+              <label htmlFor="entry-telegram-username">Telegram username</label>
+              <input
+                id="entry-telegram-username"
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                autoComplete="username"
+                inputMode="text"
+                maxLength={64}
+                placeholder="@username"
+                required
+              />
+              <Button type="submit" loading={state === 'requesting'} icon="telegram">
+                Send me a code
+              </Button>
+            </form>
+            <button className="text-button entry-step-link" type="button" onClick={enterCode}>
+              I already have a pairing code
+            </button>
+            {state === 'error' ? (
+              <p className="entry-form-error" role="alert">
+                {error}
               </p>
-            </>
-          ) : (
+            ) : null}
+            <button
+              className="text-button entry-step-link"
+              type="button"
+              onClick={() => setTelegramStage('choice')}
+            >
+              Back
+            </button>
+          </div>
+        ) : null}
+
+        {telegramStage === 'code' ? (
+          <div className="entry-primary-method entry-telegram-step">
+            <SectionLabel>CONNECT TELEGRAM</SectionLabel>
+            <h2>Enter your pairing code</h2>
+            <p className="entry-step-copy">
+              {telegramMessage ?? 'Enter the one-time code from Rallyo Bot.'}
+            </p>
             <form className="entry-code-form" onSubmit={(event) => void exchange(event)}>
-              <SectionLabel>TELEGRAM PLAYER</SectionLabel>
-              <label htmlFor="entry-pairing-code">Enter your Rallyo pairing code</label>
+              <label htmlFor="entry-pairing-code">Telegram pairing code</label>
               <input
                 id="entry-pairing-code"
                 value={code}
@@ -188,60 +277,25 @@ export function PlayerEntryPage() {
                 placeholder="6 to 8 characters"
                 required
               />
-              <p className="field-message">Get a one-time code from RallyoBot in Telegram.</p>
               <Button type="submit" loading={state === 'exchanging'} icon="arrow-right">
-                Continue
+                Connect Telegram
               </Button>
-              {state === 'error' ? (
-                <p className="entry-form-error" role="alert">
-                  {error}
-                </p>
-              ) : null}
             </form>
-          )}
-        </div>
-
-        <div className="entry-secondary-method">
-          {environment.host === 'nimiq-pay' ? (
-            <form className="entry-code-form" onSubmit={(event) => void exchange(event)}>
-              <SectionLabel>ALREADY ON TELEGRAM?</SectionLabel>
-              <label htmlFor="entry-pairing-code-wallet">Enter your pairing code</label>
-              <input
-                id="entry-pairing-code-wallet"
-                value={code}
-                onChange={(event) => setCode(event.target.value)}
-                autoComplete="one-time-code"
-                inputMode="text"
-                maxLength={100}
-                placeholder="6 to 8 characters"
-                required
-              />
-              <Button type="submit" variant="secondary" loading={state === 'exchanging'}>
-                Continue with Telegram
-              </Button>
-              {state === 'error' ? (
-                <p className="entry-form-error" role="alert">
-                  {error}
-                </p>
-              ) : null}
-            </form>
-          ) : (
-            <>
-              <SectionLabel>WALLET ACCESS</SectionLabel>
-              <WalletSignInButton
-                enabled={environment.isWalletProviderAvailable}
-                onAuthenticated={onWalletAuthenticated}
-                variant="secondary"
-                label="Continue with Nimiq Pay"
-                disabledReason="Open Rallyo inside Nimiq Pay to use wallet-backed entry."
-              />
-            </>
-          )}
-        </div>
-
-        <p className="entry-note entry-security-note">
-          Secure session exchange. Rallyo never needs an email or password for normal player entry.
-        </p>
+            {botUrl ? (
+              <a className="button button-outline" href={botUrl} target="_blank" rel="noreferrer">
+                Open Rallyo Bot
+              </a>
+            ) : null}
+            {state === 'error' ? (
+              <p className="entry-form-error" role="alert">
+                {error}
+              </p>
+            ) : null}
+            <button className="text-button entry-step-link" type="button" onClick={openTelegram}>
+              Try another username
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   )
@@ -262,6 +316,14 @@ function WalletSignInButton({
 }) {
   const [state, setState] = useState<'idle' | 'signing' | 'error'>('idle')
   const [error, setError] = useState<string | null>(null)
+
+  if (!enabled) {
+    return (
+      <p className="entry-note wallet-entry-unavailable">
+        {disabledReason ?? 'Wallet connection is available inside Nimiq Pay.'}
+      </p>
+    )
+  }
 
   const signIn = async () => {
     setState('signing')
@@ -296,8 +358,6 @@ function WalletSignInButton({
         variant={variant}
         icon="wallet"
         loading={state === 'signing'}
-        disabled={!enabled}
-        title={!enabled ? disabledReason : undefined}
         onClick={() => void signIn()}
       >
         {state === 'signing' ? 'Signing in' : label}
@@ -307,7 +367,6 @@ function WalletSignInButton({
           {error}
         </p>
       ) : null}
-      {!enabled && disabledReason ? <p className="entry-note">{disabledReason}</p> : null}
     </div>
   )
 }
@@ -398,21 +457,15 @@ export function PlayerHomePage() {
   const session = useAppSession()
   const data = session.status === 'ready' ? session.data : null
   const communities = data?.communities ?? []
-  const strongest = useMemo(
-    () => [...communities].sort((left, right) => right.points - left.points)[0] ?? null,
-    [communities],
-  )
-  const communityLoad = useCallback(
-    () =>
-      strongest ? api.community(strongest.id) : Promise.resolve(null as AppCommunityDetail | null),
-    [strongest?.id],
-  )
   const tasksLoad = useCallback(() => api.tasks(), [])
-  const rewardsLoad = useCallback(() => api.rewards(), [])
-  const community = useResource(communityLoad, Boolean(strongest))
-  const tasks = useResource(tasksLoad)
-  const rewards = useResource(rewardsLoad)
-  const avatarId = getStoredAvatarId()
+  const tasks = useResource(tasksLoad, communities.length > 0)
+  const taskCounts = useMemo(() => {
+    if (tasks.status !== 'ready') return new Map<string, number>()
+    return tasks.data.tasks.reduce((counts, task) => {
+      counts.set(task.communityId, (counts.get(task.communityId) ?? 0) + 1)
+      return counts
+    }, new Map<string, number>())
+  }, [tasks])
   const [progression, setProgression] = useState<RallyoProgression | null>(
     data?.progression ?? null,
   )
@@ -434,47 +487,15 @@ export function PlayerHomePage() {
   const { player } = data
   const currentProgression = progression ?? data.progression
 
-  const activeTasks = tasks.status === 'ready' ? tasks.data.tasks : []
-  const eligibleRewards =
-    rewards.status === 'ready'
-      ? rewards.data.entitlements.filter((reward) => reward.status === 'ELIGIBLE')
-      : []
+  const visibleCommunities = communities.slice(0, 3)
+  const hasMoreCommunities = communities.length > visibleCommunities.length
 
   return (
     <PageFrame
       eyebrow="PLAYER HOME"
       title={`Welcome back, ${player.displayName}.`}
-      detail="See the community where you are competing, then choose the next useful action."
-      action={
-        <ToneBadge tone={data.wallet.linked ? 'success' : 'neutral'}>
-          {data.wallet.linked ? 'Nimiq linked' : 'Wallet optional'}
-        </ToneBadge>
-      }
+      detail="Your communities, seasons, and next tasks."
     >
-      <section className="player-identity-panel">
-        <Avatar avatarId={avatarId} name={player.displayName} size="lg" />
-        <div>
-          <SectionLabel>RALLYO PLAYER</SectionLabel>
-          <h2>{player.displayName}</h2>
-          <p>
-            {communities.length
-              ? `${communities.length} community record${communities.length === 1 ? '' : 's'}`
-              : 'No community records yet'}
-          </p>
-          <div className="identity-methods">
-            <ToneBadge tone={player.username ? 'success' : 'warning'} icon="telegram">
-              {player.username ? 'Telegram connected' : 'Telegram not connected'}
-            </ToneBadge>
-            <ToneBadge tone={data.wallet.linked ? 'success' : 'neutral'} icon="wallet">
-              {data.wallet.linked ? 'Nimiq linked' : 'Wallet optional'}
-            </ToneBadge>
-          </div>
-        </div>
-        <Link className="button button-outline" to="/app/me">
-          You and profile
-        </Link>
-      </section>
-
       <RallyoProgressionSummary progression={currentProgression} />
 
       {checkinOpen ? (
@@ -502,12 +523,11 @@ export function PlayerHomePage() {
           onClose={() => setCheckinOpen(false)}
         />
       ) : null}
-
       {!player.username ? (
         <StatusBanner
           icon="telegram"
-          title="Connect Telegram when you are ready"
-          detail="Restore your Telegram communities, season history, tasks, and admin access without leaving this Player."
+          title="Connect Telegram to restore your communities"
+          detail="Your seasons, tasks, and admin access will appear here."
           action={
             <Link className="button button-primary" to="/app/pair">
               Connect Telegram
@@ -516,163 +536,72 @@ export function PlayerHomePage() {
         />
       ) : null}
 
-      {strongest ? (
-        <section className="home-current-record">
-          <div className="home-section-heading">
-            <div>
-              <SectionLabel>CURRENT COMMUNITY</SectionLabel>
-              <h2>{strongest.title}</h2>
-              <p>{strongest.activeSeason?.name ?? 'No active season right now.'}</p>
-            </div>
-            <div className="inline-actions">
-              <Link className="button button-outline" to={`/app/communities/${strongest.id}`}>
-                View community
-              </Link>
-              {strongest.isAdmin ? (
-                <Link className="button button-outline" to={`/app/admin/${strongest.id}`}>
-                  Manage
-                </Link>
-              ) : null}
-            </div>
-          </div>
-          <RankBlock
-            context={strongest.title}
-            points={strongest.points}
-            rank={strongest.rank}
-            {...(strongest.activeSeason ? { season: strongest.activeSeason.name } : {})}
-          />
-        </section>
-      ) : (
-        <EmptyState
-          title="Your first community record is waiting."
-          detail={
-            player.username
-              ? 'Join a Rallyo community in Telegram to start building a real score.'
-              : 'Connect Telegram to bring in your Rallyo communities and season history.'
-          }
-          action={
-            <Link
-              className="button button-primary"
-              to={player.username ? '/app/communities' : '/app/pair'}
-            >
-              {player.username ? 'View communities' : 'Connect Telegram'}
-            </Link>
-          }
-        />
-      )}
-
-      {strongest && community.status === 'error' ? (
-        <ErrorState
-          title="Current community needs attention"
-          detail={resourceError(community, 'The community record could not be loaded.')}
-          onRetry={community.retry}
-        />
-      ) : null}
-
-      <section className="home-section">
-        <div className="home-section-heading compact">
+      <section className="home-section home-communities-section">
+        <div className="home-section-heading">
           <div>
-            <SectionLabel>UP NEXT</SectionLabel>
-            <h2>Keep moving</h2>
+            <SectionLabel>YOUR COMMUNITIES</SectionLabel>
+            <h2>{communities.length ? 'Where you compete' : 'No communities yet'}</h2>
           </div>
-          <Link className="text-button" to="/app/tasks">
-            All tasks
-          </Link>
-        </div>
-        <div className="home-action-grid">
-          {tasks.status === 'loading' ? (
-            <div className="home-action-panel">
-              <LoadingLines label="Loading tasks" />
-            </div>
-          ) : null}
-          {tasks.status === 'error' ? (
-            <ErrorState
-              title="Tasks are unavailable"
-              detail={resourceError(tasks, 'The task feed could not be loaded.')}
-              onRetry={tasks.retry}
-            />
-          ) : null}
-          {tasks.status === 'ready' && activeTasks.length > 0 ? (
-            <Link className="home-action-panel home-action-link" to="/app/tasks">
-              <span className="home-action-icon home-action-icon-task">
-                <Icon name="list" size={22} />
-              </span>
-              <span>
-                <strong>
-                  {activeTasks.length} active task{activeTasks.length === 1 ? '' : 's'}
-                </strong>
-                <small>Complete a contribution and earn community points.</small>
-              </span>
-              <Icon name="arrow-up-right" size={20} />
+          {hasMoreCommunities ? (
+            <Link className="text-button" to="/app/communities">
+              View all
             </Link>
           ) : null}
-          {rewards.status === 'loading' ? (
-            <div className="home-action-panel">
-              <LoadingLines label="Checking rewards" />
-            </div>
-          ) : null}
-          {rewards.status === 'error' ? (
-            <ErrorState
-              title="Rewards are unavailable"
-              detail={resourceError(rewards, 'The reward feed could not be loaded.')}
-              onRetry={rewards.retry}
-            />
-          ) : null}
-          {rewards.status === 'ready' && eligibleRewards.length > 0 ? (
-            <Link className="home-action-panel home-action-link" to="/app/rewards">
-              <span className="home-action-icon home-action-icon-reward">
-                <Icon name="spark" size={22} />
-              </span>
-              <span>
-                <strong>
-                  {eligibleRewards.length} reward{eligibleRewards.length === 1 ? '' : 's'} available
-                </strong>
-                <small>Review the verified entitlement and wallet status.</small>
-              </span>
-              <Icon name="arrow-up-right" size={20} />
-            </Link>
-          ) : null}
-          {tasks.status === 'ready' &&
-          rewards.status === 'ready' &&
-          activeTasks.length === 0 &&
-          eligibleRewards.length === 0 ? (
-            <div className="home-action-panel home-action-empty">
-              <strong>You are caught up.</strong>
-              <span>New real tasks and reward states will appear here.</span>
-            </div>
-          ) : null}
         </div>
+        {tasks.status === 'error' ? (
+          <ErrorState
+            title="Task status is unavailable"
+            detail={resourceError(tasks, 'Active task counts could not be loaded.')}
+            onRetry={tasks.retry}
+          />
+        ) : null}
+        {communities.length > 0 ? (
+          <div className="community-list-grid">
+            {visibleCommunities.map((community) => (
+              <CommunityListItem
+                community={community}
+                key={community.id}
+                taskCount={taskCounts.get(community.id) ?? 0}
+              />
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            title="Your first community record is waiting."
+            detail={
+              player.username
+                ? 'Join a Rallyo community in Telegram to start building a real score.'
+                : 'Connect Telegram to bring in your Rallyo communities and season history.'
+            }
+            action={
+              <Link
+                className="button button-primary"
+                to={player.username ? '/app/communities' : '/app/pair'}
+              >
+                {player.username ? 'View communities' : 'Connect Telegram'}
+              </Link>
+            }
+          />
+        )}
       </section>
 
-      {strongest ? <HomeGames community={community} communityId={strongest.id} /> : null}
-
-      <section className="home-section home-lower-grid">
-        <div className="panel home-activity-panel">
+      {tasks.status === 'ready' && tasks.data.tasks.length > 0 ? (
+        <section className="home-section home-task-summary">
           <div className="home-section-heading compact">
             <div>
-              <SectionLabel>RECENT ACTIVITY</SectionLabel>
-              <h2>Your record in motion</h2>
+              <SectionLabel>ACTIVE TASKS</SectionLabel>
+              <h2>Keep moving</h2>
             </div>
-            <ToneBadge tone="neutral">REAL DATA</ToneBadge>
+            <Link className="text-button" to="/app/tasks">
+              View tasks
+            </Link>
           </div>
-          <EmptyState
-            title="No activity feed yet"
-            detail="Score and task events will appear here when the Player activity feed is available."
-          />
-        </div>
-        <div className="panel home-wallet-panel">
-          <SectionLabel>WALLET AND REWARDS</SectionLabel>
-          <h2>{data.wallet.linked ? 'Wallet connected' : 'Wallet stays optional'}</h2>
           <p>
-            {data.wallet.linked
-              ? `Rewards can use ${shortAddress(data.wallet.address)}.`
-              : 'You can compete without a wallet. Nimiq is used for wallet-backed identity and rewards.'}
+            {tasks.data.tasks.length} active task{tasks.data.tasks.length === 1 ? '' : 's'} across
+            your communities.
           </p>
-          <Link className="text-button" to="/app/rewards">
-            View wallet and rewards
-          </Link>
-        </div>
-      </section>
+        </section>
+      ) : null}
     </PageFrame>
   )
 }
@@ -682,66 +611,7 @@ function LoadingLines({ label }: { readonly label: string }) {
     <div className="loading-lines" role="status">
       <span className="loading-lines-mark" />
       <strong>{label}</strong>
-      <small>Getting the latest state.</small>
     </div>
-  )
-}
-
-function HomeGames({
-  community,
-  communityId,
-}: {
-  readonly community: ResourceState<AppCommunityDetail | null> & { readonly retry: () => void }
-  readonly communityId: string
-}) {
-  if (community.status === 'loading' || community.status === 'idle')
-    return (
-      <section className="home-section">
-        <LoadingLines label="Loading games" />
-      </section>
-    )
-  if (community.status !== 'ready' || !community.data) return null
-  return (
-    <section className="home-section">
-      <div className="home-section-heading compact">
-        <div>
-          <SectionLabel>GAMES</SectionLabel>
-          <h2>Play in Telegram</h2>
-        </div>
-        <Link className="text-button" to={`/app/communities/${communityId}?tab=games`}>
-          Open community
-        </Link>
-      </div>
-      <div className="game-strip">
-        {community.data.games.map((game) => (
-          <GameCard
-            key={game.gameKey}
-            family={
-              game.gameKey === 'project_quiz'
-                ? 'quiz'
-                : game.gameKey === 'word_seek'
-                  ? 'word-seek'
-                  : 'scramble'
-            }
-            enabled={game.enabled}
-            detail={
-              game.enabled ? 'Play in your community Telegram.' : 'This game is not enabled here.'
-            }
-            action={
-              game.enabled ? (
-                <Link
-                  className="button button-outline"
-                  to={`/app/communities/${communityId}?tab=games`}
-                >
-                  View community
-                </Link>
-              ) : null
-            }
-          />
-        ))}
-      </div>
-      <p className="coming-soon-note">More games coming soon</p>
-    </section>
   )
 }
 
@@ -787,14 +657,29 @@ export function PlayerCommunitiesPage() {
   )
 }
 
-function CommunityListItem({ community }: { readonly community: AppCommunity }) {
+function CommunityListItem({
+  community,
+  taskCount = 0,
+}: {
+  readonly community: AppCommunity
+  readonly taskCount?: number
+}) {
   return (
     <CommunityCard
       name={community.title}
+      titleAction={
+        <Link className="community-card-title-link" to={`/app/communities/${community.id}`}>
+          {community.title}
+        </Link>
+      }
       season={community.activeSeason?.name ?? 'No active season'}
       points={community.points}
       rank={community.rank}
       admin={community.isAdmin}
+      status={community.status === 'ACTIVE' ? 'Active' : 'Unavailable'}
+      taskCue={
+        taskCount > 0 ? `${taskCount} active task${taskCount === 1 ? '' : 's'}` : 'No active tasks'
+      }
       action={
         <div className="inline-actions">
           <Link className="button button-outline" to={`/app/communities/${community.id}`}>
@@ -1685,7 +1570,7 @@ export function PlayerRewardsPage() {
     <PageFrame
       eyebrow="WALLET AND REWARDS"
       title="Wallet and rewards"
-      detail="Rewards are community and season entitlements. Claims only change state after the verified reward service accepts them."
+      detail="Community rewards and their claim status."
     >
       <BackLink to="/app/me">Back to You</BackLink>
       {result.status === 'loading' ? <LoadingLines label="Loading rewards" /> : null}
@@ -1726,8 +1611,8 @@ function RewardsContent({
         <StatusBanner
           tone="info"
           icon="wallet"
-          title="Wallet is optional"
-          detail="You can compete without a wallet. Nimiq is used for wallet-backed identity and rewards."
+          title="Wallet not linked"
+          detail="Link a wallet in Nimiq Pay when you are ready to claim a reward."
           action={walletSignIn}
         />
       ) : (
@@ -1746,19 +1631,18 @@ function RewardsContent({
       <section className="rewards-section">
         <div className="home-section-heading compact">
           <div>
-            <SectionLabel>ENTITLEMENTS</SectionLabel>
+            <SectionLabel>REWARDS</SectionLabel>
             <h2>
               {rewards.entitlements.length
                 ? `${rewards.entitlements.length} reward${rewards.entitlements.length === 1 ? '' : 's'}`
                 : 'No rewards yet'}
             </h2>
           </div>
-          <ToneBadge tone="neutral">REAL SERVICE STATE</ToneBadge>
         </div>
         {rewards.entitlements.length === 0 ? (
           <EmptyState
-            title="No reward entitlements yet"
-            detail="Eligible rewards appear here after a community season has finalized them."
+            title="No rewards yet"
+            detail="Available rewards appear after a community season is finalized."
           />
         ) : (
           <div className="reward-list">
@@ -1794,7 +1678,7 @@ function RewardRow({ reward }: { readonly reward: AppRewards['entitlements'][num
         {reward.amountLuna} <small>LUNA</small>
       </strong>
       <div className="reward-status">
-        <ToneBadge tone={tone}>{reward.status}</ToneBadge>
+        <ToneBadge tone={tone}>{rewardStatusLabel(reward.status)}</ToneBadge>
         {reward.transactionHash ? <code>{shortAddress(reward.transactionHash)}</code> : null}
       </div>
       {reward.status === 'ELIGIBLE' ? (
@@ -1805,9 +1689,26 @@ function RewardRow({ reward }: { readonly reward: AppRewards['entitlements'][num
           disabled
           title="Reward claiming is not exposed by the current app API"
         >
-          Claim unavailable
+          Claim not available yet
         </Button>
       ) : null}
     </article>
   )
+}
+
+function rewardStatusLabel(status: string) {
+  switch (status) {
+    case 'ELIGIBLE':
+      return 'Available'
+    case 'CLAIMING':
+      return 'Processing'
+    case 'SENT':
+      return 'Sent'
+    case 'CONFIRMED':
+      return 'Confirmed'
+    case 'FAILED':
+      return 'Needs attention'
+    default:
+      return 'Recorded'
+  }
 }
