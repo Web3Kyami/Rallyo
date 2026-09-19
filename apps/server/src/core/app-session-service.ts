@@ -105,7 +105,9 @@ export class AppSessionService {
     readonly telegramIdentityId: string
     readonly now?: Date
   }) {
-    return issueTelegramPairingCode(this.database, input)
+    return this.database.transaction((tx) =>
+      issueTelegramPairingCode(tx, { ...input, replaceActive: true }),
+    )
   }
 
   async requestTelegramPairing(input: {
@@ -378,15 +380,30 @@ export async function issueTelegramPairingCode(
   input: {
     readonly telegramIdentityId: string
     readonly now?: Date
+    readonly replaceActive?: boolean
   },
 ) {
   const now = input.now ?? new Date()
-  const [identity] = await database
+  const identityQuery = database
     .select({ id: schema.telegramIdentities.id })
     .from(schema.telegramIdentities)
     .where(eq(schema.telegramIdentities.id, input.telegramIdentityId))
     .limit(1)
+  const [identity] = input.replaceActive ? await identityQuery.for('update') : await identityQuery
   if (!identity) throw new AppSessionError('Telegram identity could not be loaded.')
+
+  if (input.replaceActive) {
+    await database
+      .update(schema.telegramPairingCodes)
+      .set({ consumedAt: now })
+      .where(
+        and(
+          eq(schema.telegramPairingCodes.telegramIdentityId, identity.id),
+          isNull(schema.telegramPairingCodes.consumedAt),
+          gt(schema.telegramPairingCodes.expiresAt, now),
+        ),
+      )
+  }
 
   const code = randomPairingCode()
   const [row] = await database

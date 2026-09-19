@@ -744,6 +744,7 @@ export const socialTasks = pgTable(
     platform: socialTaskPlatform('platform').notNull().default('OTHER'),
     action: socialTaskAction('action').notNull().default('OTHER'),
     targetUrl: text('target_url'),
+    announcementMediaFileId: text('announcement_media_file_id'),
     proofType: socialProofType('proof_type').notNull().default('URL'),
     requiresHandle: boolean('requires_handle').notNull().default(false),
     maxSubmissionsPerPlayer: integer('max_submissions_per_player'),

@@ -3,7 +3,7 @@ import { createRallyoBot } from '@rallyo/telegram'
 import { and, asc, eq, gt, gte, isNull, lte, or } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Context } from 'grammy'
-import { InlineKeyboard } from 'grammy'
+import { InlineKeyboard, InputFile } from 'grammy'
 
 import type { RallyoDatabase } from '../db/client'
 import * as schema from '../db/schema'
@@ -151,10 +151,7 @@ export function createTelegramRuntime(options: TelegramRuntimeOptions) {
         return
       }
 
-      await context.reply(
-        startMessage(),
-        messageOptions(playerKeyboard(options.appBaseUrl, appSessionService)),
-      )
+      await context.reply(startMessage(), messageOptions(playerKeyboard()))
     },
     onHelp: async (context) => {
       const isAdmin =
@@ -167,14 +164,7 @@ export function createTelegramRuntime(options: TelegramRuntimeOptions) {
       await handleSettings(options.database, context, now())
     },
     onMe: async (context) => {
-      await handleMe(
-        options.database,
-        roundService,
-        context,
-        now(),
-        options.appBaseUrl,
-        appSessionService,
-      )
+      await handleMe(options.database, roundService, context, now())
     },
     onLink: async (context) => {
       await handleLink(options.database, walletLinkService, context, options.appBaseUrl, now())
@@ -1643,7 +1633,13 @@ async function handleTaskCreate(
       ...(cooldownDays === undefined ? {} : { cooldownDays }),
       createdByTelegramUserId: BigInt(context.from.id),
     })
-    const announced = await announceSocialTask(context, community, task, currentTime)
+    const announced = await announceSocialTask(
+      context,
+      socialTaskService,
+      community,
+      task,
+      currentTime,
+    )
     await context.reply(
       announced
         ? `✅ Task published and announced in <b>${escapeHtml(community.title)}</b>: <b>${escapeHtml(task.title)}</b>.`
@@ -1661,16 +1657,32 @@ async function handleTaskCreate(
 
 async function announceSocialTask(
   context: Context,
+  socialTaskService: SocialTaskService,
   community: Pick<typeof schema.communities.$inferSelect, 'id' | 'title' | 'telegramChatId'>,
   task: typeof schema.socialTasks.$inferSelect,
   currentTime: Date,
 ): Promise<boolean> {
   try {
-    await context.api.sendMessage(
+    const sent = await context.api.sendPhoto(
       toTelegramApiChatId(community.telegramChatId),
-      renderSocialTaskCard(task, currentTime),
-      messageOptions(socialTaskCardKeyboard(task)),
+      task.announcementMediaFileId
+        ? task.announcementMediaFileId
+        : new InputFile(new URL('../../assets/rallyo-social-task.png', import.meta.url)),
+      {
+        ...messageOptions(socialTaskCardKeyboard(task)),
+        caption: renderSocialTaskCard(task, currentTime),
+      },
     )
+    if (!task.announcementMediaFileId) {
+      const fileId = sent.photo?.at(-1)?.file_id
+      if (fileId) {
+        await socialTaskService.cacheAnnouncementMediaFileId({
+          taskId: task.id,
+          fileId,
+          now: currentTime,
+        })
+      }
+    }
     return true
   } catch {
     return false
@@ -2264,27 +2276,14 @@ async function handlePlayerCallback(
     await handleLink(database, walletLinkService, context, appBaseUrl, currentTime)
     return
   }
-  if (data === 'player:open') {
+  if (data === 'player:pair' || data === 'player:open') {
     await context.answerCallbackQuery()
-    if (!appBaseUrl || !context.from) {
-      await context.reply('Open Rallyo from the link in Telegram when the app URL is configured.')
-      return
-    }
-    const { telegramIdentityId } = await ensureTelegramPlayer(database, context)
-    const issued = await appSessionService.issueCode({
-      telegramIdentityId,
-      now: currentTime,
-    })
-    const link = `${appBaseUrl.replace(/\/$/u, '')}/app/open?code=${encodeURIComponent(issued.code)}`
-    await context.reply(
-      `<b>OPEN RALLYO</b>\n\n${escapeHtml(link)}\n\nThis link expires in five minutes and can be used once.`,
-      messageOptions(),
-    )
+    await handlePair(database, appSessionService, context, currentTime)
     return
   }
   if (data === 'player:me') {
     await context.answerCallbackQuery()
-    await handleMe(database, roundService, context, currentTime, appBaseUrl, appSessionService)
+    await handleMe(database, roundService, context, currentTime)
     return
   }
   if (data === 'player:tasks') {
@@ -2972,7 +2971,13 @@ async function handleAdminCallback(
         ...(completionCap !== null ? { completionCapPerPlayer: completionCap } : {}),
         createdByTelegramUserId: BigInt(context.from.id),
       })
-      const announced = await announceSocialTask(context, community, task, currentTime)
+      const announced = await announceSocialTask(
+        context,
+        socialTaskService,
+        community,
+        task,
+        currentTime,
+      )
       await clearAdminWizardSession(database, BigInt(context.from.id), community.id)
       await context.reply(
         announced
@@ -3182,6 +3187,7 @@ async function handleAdminCallback(
       const capabilityByCallbackKey: Record<string, string> = {
         // Compact keys are used for new keyboards. The full names remain accepted
         // so an already-delivered older keyboard still resolves safely.
+        quiz: 'project_quiz',
         ws: 'word_seek',
         sc: 'scramble',
         tasks: 'social_tasks',
@@ -3190,6 +3196,7 @@ async function handleAdminCallback(
         scramble: 'scramble',
         social_tasks: 'social_tasks',
         message_activity: 'message_activity',
+        project_quiz: 'project_quiz',
       }
       const capabilityKey = argument ? capabilityByCallbackKey[argument] : undefined
       if (!capabilityKey) {
@@ -4155,8 +4162,6 @@ async function handleMe(
   roundService: RoundService,
   context: Context,
   currentTime: Date,
-  appBaseUrl?: string,
-  appSessionService?: AppSessionService,
 ): Promise<void> {
   if (!context.from) return
 
@@ -4212,8 +4217,8 @@ async function handleMe(
     : '<b>🔗 Nimiq wallet not linked</b>\n\nYou can keep playing without a wallet. Link one when you want wallet-backed identity or Rallyo-native rewards.'
 
   await context.reply(
-    `<b>📊 YOUR RALLYO</b>\n\n${renderTopCommunities(currentCommunities)}\n\nLifetime XP · ${lifetimeXp}\nScored communities · ${scoredCommunityCount}\n\n${walletMessage}`,
-    messageOptions(playerKeyboard(appBaseUrl, appSessionService)),
+    `<b>📊 YOUR RALLYO</b>\n\n${renderTopCommunities(currentCommunities)}\n\nLifetime XP · ${lifetimeXp}\nScored communities · ${scoredCommunityCount}\n\n${walletMessage}\n\n<b>Need Rallyo in your browser?</b>\nGet a one-time pairing code below. It expires in 10 minutes.`,
+    messageOptions(playerKeyboard()),
   )
 }
 
@@ -4285,8 +4290,8 @@ async function handlePair(
     now: currentTime,
   })
   await context.reply(
-    `<b>TELEGRAM PAIRING CODE</b>\n\n<code>${issued.code}</code>\n\nEnter this code in Rallyo under Connect Telegram. It expires in 10 minutes and can be used once.`,
-    messageOptions(),
+    `<b>🔗 CONNECT TELEGRAM TO RALLYO</b>\n\nYour one-time pairing code is:\n<code>${issued.code}</code>\n\nEnter it in Rallyo to connect this Telegram account. It expires in 10 minutes and works once.\n\nNeed another one? Generate a new code below.`,
+    messageOptions(pairingKeyboard()),
   )
 }
 
@@ -4502,6 +4507,7 @@ function navigationPageForTarget(value: string): AdminNavigationPage | null {
 }
 
 function navigationPageForCapability(capabilityKey: string): AdminNavigationPage {
+  if (capabilityKey === 'project_quiz') return 'quiz'
   if (capabilityKey === 'word_seek') return 'wordseek'
   if (capabilityKey === 'scramble') return 'scramble'
   if (capabilityKey === 'social_tasks') return 'tasks'
@@ -4874,30 +4880,39 @@ export function renderSocialTaskCard(
   currentTime: Date,
   dailyStatus?: SocialTaskDailyStatus,
 ): string {
-  const remainingHours = Math.max(
-    1,
-    Math.ceil((task.endsAt.getTime() - currentTime.getTime()) / 3_600_000),
-  )
-  const proof =
-    task.proofType === 'URL'
-      ? 'Link'
-      : task.proofType === 'SCREENSHOT'
-        ? 'Screenshot or document'
-        : 'Link plus screenshot or document'
-  const limit =
+  const rules = task.instructions
+    .split(/\r?\n/u)
+    .map((rule) => rule.trim().replace(/^(?:[•*-]|\d+[.)])\s*/u, ''))
+    .filter(Boolean)
+    .map((rule) => `• ${escapeHtml(truncateTelegramText(rule, 260))}`)
+    .join('\n')
+  const link = task.targetUrl ? `\n\n<b>LINK</b>\n${escapeHtml(task.targetUrl)}` : ''
+  const dailyLimit =
+    task.taskType === 'RECURRING' && task.maxApprovedSubmissionsPerPlayerPerDay !== null
+      ? ` · Up to ${task.maxApprovedSubmissionsPerPlayerPerDay} approved submission${task.maxApprovedSubmissionsPerPlayerPerDay === 1 ? '' : 's'} per day`
+      : ''
+  const completionLimit =
     task.taskType === 'CAMPAIGN' && task.completionCapPerPlayer !== null
-      ? `Once per player`
-      : task.maxApprovedSubmissionsPerPlayerPerDay !== null
-        ? `${task.maxApprovedSubmissionsPerPlayerPerDay} approved per day`
-        : 'No daily limit'
+      ? ' · One approved submission per player'
+      : ''
   const today =
     dailyStatus?.remaining !== null && dailyStatus?.remaining !== undefined
-      ? `\nToday · ${dailyStatus.remaining} submission${dailyStatus.remaining === 1 ? '' : 's'} remaining`
+      ? `\n\nYou have ${dailyStatus.remaining} submission${dailyStatus.remaining === 1 ? '' : 's'} remaining today.`
       : ''
-  const target = task.targetUrl
-    ? `\nTarget · <a href="${escapeHtml(task.targetUrl)}">Open reference</a>`
-    : ''
-  return `<b>🎯 ${escapeHtml(task.title)}</b>\n\n${formatSocialTaskAction(task.platform, task.action)} · ${task.taskType === 'CAMPAIGN' ? 'campaign' : 'recurring'}\nReward · <b>+${task.points} points</b>\nProof · ${proof}\nLimit · ${limit}${target}\n\n${escapeHtml(truncateTelegramText(task.instructions, 600))}\n\nAvailable until · ${taskTimeLabel(task.endsAt)} · about ${remainingHours}h left${today}`
+  return `<b>🎯 NEW TASK</b>\n\n<b>${escapeHtml(task.title)}</b>${link}\n\n<b>RULES</b>\n${rules || '• Follow the instructions and submit your proof through Rallyo.'}\n\nSubmit your proof through Rallyo.${today}\n\n<i>Reward: +${task.points} pts${task.taskType === 'RECURRING' ? ' each' : ''}${dailyLimit}${completionLimit} · ${humanizeTaskDeadline(task.endsAt, currentTime)}</i>`
+}
+
+function humanizeTaskDeadline(endsAt: Date, currentTime: Date): string {
+  const remainingMs = endsAt.getTime() - currentTime.getTime()
+  const remainingHours = Math.max(1, Math.ceil(remainingMs / 3_600_000))
+  if (remainingHours <= 24) {
+    return `Ends in ${remainingHours} hour${remainingHours === 1 ? '' : 's'}`
+  }
+
+  const remainingDays = Math.max(1, Math.ceil(remainingMs / 86_400_000))
+  if (remainingDays <= 7) return `Ends in ${remainingDays} day${remainingDays === 1 ? '' : 's'}`
+
+  return `Ends on ${endsAt.toISOString().slice(0, 10)}`
 }
 
 export function renderSocialTaskDecisionNotification(input: {
@@ -4967,10 +4982,12 @@ function formatSocialTaskAction(
 }
 
 export function socialTaskCardKeyboard(task: SocialTaskListRow): InlineKeyboard {
-  return new InlineKeyboard()
-    .text('✅ Submit proof', telegramCallbackData(`player:task:${task.id}`))
-    .row()
-    .text('↩️ All tasks', 'player:tasks')
+  const keyboard = new InlineKeyboard().text(
+    '✅ Submit proof',
+    telegramCallbackData(`player:task:${task.id}`),
+  )
+  if (task.targetUrl) keyboard.row().url('🔗 Open post', task.targetUrl)
+  return keyboard.row().text('↩️ All tasks', 'player:tasks')
 }
 
 function renderPendingSocialTasks(
@@ -5072,6 +5089,10 @@ export function wordSeekVocabularyKeyboard(
   keyboard.text('➕ Add project word', adminCallback('word_add', communityId))
   keyboard.row()
   keyboard.text('Refresh', adminCallback('wordseek_words', communityId))
+  keyboard.row()
+  keyboard
+    .text('↩ Content', adminCallback('back', communityId, 'content'))
+    .text('⚙️ Home', adminCallback('back', communityId, 'home'))
   return keyboard
 }
 
@@ -5086,23 +5107,16 @@ export function helpMessage(isAdmin = false): string {
   return `<b>ℹ️ Rallyo help</b>\n\n<b>Play</b>\n/me · your score, rank, and wallet status\n/tasks · active community tasks\n/task_submit · send a task URL or reference\n\n<b>Games</b>\nProject Quiz · answer the prompt, first correct wins\nWord Seek · solve the hidden word\nScramble · solve the mixed-up term\n\n<b>Account</b>\n/start · welcome and player actions\n/link · connect Nimiq for wallet-backed rewards\n/pair · get a one-time code to connect Telegram in Rallyo\n/help · show this guide${adminSection}`
 }
 
-function playerKeyboard(
-  appBaseUrl: string | undefined,
-  appSessionService: AppSessionService | undefined,
-): InlineKeyboard {
-  const keyboard = new InlineKeyboard()
+function playerKeyboard(): InlineKeyboard {
+  return new InlineKeyboard()
     .text('📊 My score', 'player:me')
     .text('🔗 Link Nimiq', 'player:link')
+    .row()
+    .text('🔐 Pair Rallyo', 'player:pair')
+}
 
-  if (appBaseUrl) {
-    if (appSessionService) {
-      keyboard.row().text('🌐 Open Rallyo', 'player:open')
-    } else {
-      keyboard.row().url('🌐 Player view', appBaseUrl)
-    }
-  }
-
-  return keyboard
+function pairingKeyboard(): InlineKeyboard {
+  return new InlineKeyboard().text('🔄 New code', 'player:pair').text('📊 My score', 'player:me')
 }
 
 export const TELEGRAM_CALLBACK_DATA_MAX_BYTES = 64
@@ -5168,6 +5182,7 @@ export function gameKeyboard(
       .text('⏱ Schedule quiz', adminCallback('schedule', communityId))
       .row()
       .text('📝 Questions', adminCallback('section', communityId, 'content'))
+      .text('⚙️ Enable or disable', adminCallback('toggle', communityId, 'quiz'))
       .row()
   } else if (game === 'wordseek') {
     keyboard

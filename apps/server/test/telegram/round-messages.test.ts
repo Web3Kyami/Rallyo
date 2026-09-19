@@ -30,6 +30,7 @@ describe('Telegram round messages', () => {
     })
 
     expect(message.text).toContain('&lt;unsafe prompt&gt;')
+    expect(message.text).not.toContain('<blockquote>')
     expect(message.replyMarkup?.inline_keyboard).toEqual([
       [{ text: 'Sign', callback_data: 'player:quick:round-1:0' }],
       [{ text: 'Send', callback_data: 'player:quick:round-1:1' }],
@@ -123,7 +124,7 @@ describe('Telegram round messages', () => {
     }
 
     expect(renderClueRevealMessage(round, 2).text).toBe(
-      '<b>💡 CLUE 2</b>\n\n&gt; second\n\n<i>20 pts remaining</i>',
+      '<b>💡 CLUE 2</b>\n\nsecond\n\n<i>20 pts remaining</i>',
     )
     expect(renderClueRevealMessage(round, 3).text).toContain('<b>💡 CLUE 3</b>')
     expect(renderClueRevealMessage(round, 3).text).toContain('10 pts remaining')
@@ -137,7 +138,7 @@ describe('Telegram round messages', () => {
         clueNumber: 2,
         points: 20,
       }),
-    ).toContain('<b>🏆 CLUE ROUND · ANSWERED</b>')
+    ).toContain('<b>✅ CORRECT · PROJECT QUIZ</b>')
     expect(
       renderClueRoundAnswered({
         prompt: 'Guess the proof method.',
@@ -161,7 +162,7 @@ describe('Telegram round messages', () => {
         points: 15,
       }),
     ).toBe(
-      '<b>🏆 FIRST CORRECT · ANSWERED</b>\n\n&lt;What proves control?&gt;\n\n✅ <b>sign a message</b>\n\n<b>@alice got it first</b>\n✨ <b>+15 pts</b>',
+      '<b>✅ CORRECT · PROJECT QUIZ</b>\n\n&lt;What proves control?&gt;\n\n@alice got it first\n\nAnswer: <b>sign a message</b>\n\n<b>+15 pts</b>',
     )
   })
 
@@ -199,7 +200,7 @@ describe('Telegram round messages', () => {
         points: 20,
         rank: 4,
       }),
-    ).toContain('<a href="tg://user?id=701">Alice</a> won')
+    ).toContain('<a href="tg://user?id=701">Alice</a> got it first')
   })
 
   it('uses configured hint timings and reductions', () => {

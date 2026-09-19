@@ -22,6 +22,17 @@ export class SocialTaskError extends Error {
 export class SocialTaskService {
   constructor(private readonly database: RallyoDatabase) {}
 
+  async cacheAnnouncementMediaFileId(input: {
+    readonly taskId: string
+    readonly fileId: string
+    readonly now: Date
+  }): Promise<void> {
+    await this.database
+      .update(schema.socialTasks)
+      .set({ announcementMediaFileId: input.fileId, updatedAt: input.now })
+      .where(eq(schema.socialTasks.id, input.taskId))
+  }
+
   async archiveExpired(now: Date, communityId?: string): Promise<number> {
     const rows = await this.database
       .update(schema.socialTasks)

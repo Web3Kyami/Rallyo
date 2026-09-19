@@ -177,7 +177,13 @@ describeDatabase('Scramble against PostgreSQL', () => {
       await db
         .select()
         .from(schema.scoreEvents)
-        .where(eq(schema.scoreEvents.sourceType, 'SCRAMBLE')),
+        .where(
+          and(
+            eq(schema.scoreEvents.sourceType, 'SCRAMBLE'),
+            eq(schema.scoreEvents.communityId, ids.communityOne),
+            eq(schema.scoreEvents.seasonId, ids.seasonOne),
+          ),
+        ),
     ).toHaveLength(1)
 
     await new ScoreEventService(db).award({
@@ -279,7 +285,17 @@ describeDatabase('Scramble against PostgreSQL', () => {
     expect(
       await scramble.activeRoundForCommunity(ids.communityOne, new Date(now.getTime() + 30_001)),
     ).toBeNull()
-    expect(await db.select().from(schema.walletIdentities)).toHaveLength(0)
+    expect(
+      await db
+        .select()
+        .from(schema.walletIdentities)
+        .where(
+          or(
+            eq(schema.walletIdentities.playerId, ids.playerOne),
+            eq(schema.walletIdentities.playerId, ids.playerTwo),
+          ),
+        ),
+    ).toHaveLength(0)
   })
 
   it('prefers approved project vocabulary while retaining the general fallback', async () => {
