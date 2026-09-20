@@ -85,7 +85,7 @@ function PlayerShell() {
         ) : null}
         <div className="rail-footer">
           <Link className="text-button" to="/app/rewards">
-            Rewards
+            {session.data.wallet.linked ? 'Rewards' : 'Connect Nimiq'}
           </Link>
           <button className="text-button" type="button" onClick={() => void session.logout()}>
             Sign out
