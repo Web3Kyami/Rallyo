@@ -1386,7 +1386,7 @@ export function PlayerProfilePage() {
           </Button>
         ) : (
           <Link className="button button-outline" to="/app/rewards">
-            Wallet and rewards
+            Connect Nimiq
           </Link>
         )}
       </section>
