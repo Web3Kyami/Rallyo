@@ -66,14 +66,14 @@ export function quizDifficultyPreset(difficulty: ResolvedDifficulty): QuizDiffic
     case 'MEDIUM':
       return {
         answerTimeoutSeconds: 20,
-        hintsEnabled: true,
+        hintsEnabled: false,
         hintTimingSeconds: [9, 15],
         pointReductions: [0, 5, 10],
       }
     case 'HARD':
       return {
         answerTimeoutSeconds: 15,
-        hintsEnabled: true,
+        hintsEnabled: false,
         hintTimingSeconds: [8, 12],
         pointReductions: [0, 8, 14],
       }

@@ -19,17 +19,15 @@ export class ManualScoreService {
     readonly communityId: string
     readonly playerId: string
     readonly points: number
-    readonly reason: string
+    readonly reason?: string
     readonly awardedByTelegramUserId: bigint
     readonly idempotencyKey: string
     readonly now: Date
   }) {
-    if (!Number.isSafeInteger(input.points) || input.points <= 0) {
-      throw new ManualScoreAwardError('Manual awards must use a positive safe integer.')
+    if (!Number.isSafeInteger(input.points) || input.points === 0) {
+      throw new ManualScoreAwardError('Manual adjustments must use a non-zero safe integer.')
     }
-    if (input.reason.trim().length === 0) {
-      throw new ManualScoreAwardError('A reason is required for manual awards.')
-    }
+    const reason = input.reason?.trim() || 'Admin adjustment'
 
     await assertCommunityAdmin(this.database, input.communityId, input.awardedByTelegramUserId)
 
@@ -90,7 +88,7 @@ export class ManualScoreService {
           seasonId: season.id,
           playerId: input.playerId,
           points: input.points,
-          reason: input.reason,
+          reason,
           awardedByTelegramUserId: input.awardedByTelegramUserId,
           idempotencyKey: input.idempotencyKey,
         })
@@ -104,7 +102,7 @@ export class ManualScoreService {
         sourceType: 'MANUAL',
         sourceId: award.id,
         points: input.points,
-        reason: input.reason,
+        reason,
         idempotencyKey: input.idempotencyKey,
       })
 

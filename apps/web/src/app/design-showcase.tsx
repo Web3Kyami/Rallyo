@@ -57,7 +57,7 @@ export function DesignShowcasePage() {
 
       <div className="showcase-content">
         <StatusBanner
-          detail="The player identity can use Telegram, Nimiq, or both. This banner is an example of a real connection state."
+          detail="The player identity can begin through Telegram or Nimiq. A verified Nimiq wallet is required before a reward claim."
           icon="link"
           title="Connect Telegram when you are ready"
           tone="accent"

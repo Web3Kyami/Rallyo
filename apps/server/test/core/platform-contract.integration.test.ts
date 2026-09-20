@@ -425,6 +425,21 @@ describeDatabase('Phase 7.5A platform contract against PostgreSQL', () => {
       await db.select().from(schema.scoreEvents).where(eq(schema.scoreEvents.sourceType, 'MANUAL')),
     ).toHaveLength(1)
 
+    const deduction = await awards.award({
+      communityId: input.communityId,
+      playerId: input.playerId,
+      points: -5,
+      awardedByTelegramUserId: input.awardedByTelegramUserId,
+      idempotencyKey: 'manual-award:negative',
+      now: input.now,
+    })
+    expect(deduction.created).toBe(true)
+    expect(deduction.scoreEvent.delta).toBe(-5)
+    expect(deduction.award.reason).toBe('Admin adjustment')
+    expect(
+      await db.select().from(schema.scoreEvents).where(eq(schema.scoreEvents.sourceType, 'MANUAL')),
+    ).toHaveLength(2)
+
     await expect(
       awards.award({ ...input, idempotencyKey: 'manual-award:2', awardedByTelegramUserId: 999n }),
     ).rejects.toBeInstanceOf(CommunityAuthorizationError)

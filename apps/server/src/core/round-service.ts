@@ -1,5 +1,5 @@
 import { matchesAcceptedAnswer, normalizeAnswer, scoreEventKey } from '@rallyo/core'
-import { and, desc, eq, gt, gte, lte, lt, or, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, gte, isNull, lte, lt, or, sql } from 'drizzle-orm'
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres'
 import type { ExtractTablesWithRelations } from 'drizzle-orm'
 
@@ -259,6 +259,150 @@ export class RoundService {
       )
       .returning({ id: schema.rounds.id })
 
+    return rows.length > 0
+  }
+
+  async stopLiveRoundsForCommunity(communityId: string, now: Date) {
+    return this.database
+      .update(schema.rounds)
+      .set({
+        state: 'CLOSED',
+        outcomeNotifiedAt: now,
+        version: sql`${schema.rounds.version} + 1`,
+      })
+      .where(and(eq(schema.rounds.communityId, communityId), eq(schema.rounds.state, 'LIVE')))
+      .returning({ id: schema.rounds.id, telegramMessageId: schema.rounds.telegramMessageId })
+  }
+
+  async closeDueQuizRounds(now: Date) {
+    return this.database
+      .update(schema.rounds)
+      .set({ state: 'CLOSED', version: sql`${schema.rounds.version} + 1` })
+      .where(and(eq(schema.rounds.state, 'LIVE'), lte(schema.rounds.locksAt, now)))
+      .returning({ id: schema.rounds.id })
+  }
+
+  async pendingQuizTimeoutRounds(now: Date) {
+    return this.database
+      .select({
+        id: schema.rounds.id,
+        communityId: schema.rounds.communityId,
+        telegramChatId: schema.communities.telegramChatId,
+        telegramMessageId: schema.rounds.telegramMessageId,
+        mediaFileId: schema.questions.mediaFileId,
+        prompt: schema.questions.prompt,
+        correctAnswer: schema.questions.correctAnswer,
+      })
+      .from(schema.rounds)
+      .innerJoin(schema.communities, eq(schema.rounds.communityId, schema.communities.id))
+      .innerJoin(schema.questions, eq(schema.rounds.questionId, schema.questions.id))
+      .where(
+        and(
+          eq(schema.rounds.state, 'CLOSED'),
+          lte(schema.rounds.locksAt, now),
+          isNull(schema.rounds.outcomeNotifiedAt),
+        ),
+      )
+      .orderBy(schema.rounds.locksAt)
+  }
+
+  async closedRoundForCommunity(communityId: string, now: Date) {
+    const [round] = await this.database
+      .select({
+        id: schema.rounds.id,
+        acceptedAnswers: schema.questions.acceptedAnswers,
+      })
+      .from(schema.rounds)
+      .innerJoin(schema.questions, eq(schema.rounds.questionId, schema.questions.id))
+      .where(
+        and(
+          eq(schema.rounds.communityId, communityId),
+          eq(schema.rounds.state, 'CLOSED'),
+          lte(schema.rounds.locksAt, now),
+        ),
+      )
+      .orderBy(desc(schema.rounds.locksAt))
+      .limit(1)
+    return round ?? null
+  }
+
+  async markRoundOutcomeNotified(roundId: string, now: Date): Promise<boolean> {
+    const rows = await this.database
+      .update(schema.rounds)
+      .set({ outcomeNotifiedAt: now, version: sql`${schema.rounds.version} + 1` })
+      .where(and(eq(schema.rounds.id, roundId), isNull(schema.rounds.outcomeNotifiedAt)))
+      .returning({ id: schema.rounds.id })
+    return rows.length > 0
+  }
+
+  async replaceTelegramMessageId(roundId: string, telegramMessageId: bigint): Promise<boolean> {
+    const rows = await this.database
+      .update(schema.rounds)
+      .set({ telegramMessageId, version: sql`${schema.rounds.version} + 1` })
+      .where(eq(schema.rounds.id, roundId))
+      .returning({ id: schema.rounds.id })
+    return rows.length > 0
+  }
+
+  async quizSummaryFor(quizId: string) {
+    return this.database
+      .select({
+        sequence: schema.quizQuestions.sequence,
+        prompt: schema.questions.prompt,
+        correctAnswer: schema.questions.correctAnswer,
+        roundId: schema.rounds.id,
+        winnerPlayerId: schema.answers.playerId,
+        winnerTelegramUserId: schema.telegramIdentities.telegramUserId,
+        winnerDisplayName: schema.telegramIdentities.displayName,
+        points: schema.scoreEvents.delta,
+      })
+      .from(schema.quizQuestions)
+      .innerJoin(schema.questions, eq(schema.quizQuestions.questionId, schema.questions.id))
+      .leftJoin(
+        schema.rounds,
+        and(
+          eq(schema.rounds.quizId, schema.quizQuestions.quizId),
+          eq(schema.rounds.questionId, schema.quizQuestions.questionId),
+        ),
+      )
+      .leftJoin(
+        schema.answers,
+        and(eq(schema.answers.roundId, schema.rounds.id), eq(schema.answers.isCorrect, true)),
+      )
+      .leftJoin(
+        schema.telegramIdentities,
+        eq(schema.telegramIdentities.playerId, schema.answers.playerId),
+      )
+      .leftJoin(
+        schema.scoreEvents,
+        and(
+          eq(schema.scoreEvents.roundId, schema.rounds.id),
+          eq(schema.scoreEvents.playerId, schema.answers.playerId),
+        ),
+      )
+      .where(eq(schema.quizQuestions.quizId, quizId))
+      .orderBy(schema.quizQuestions.sequence)
+  }
+
+  async quizRoundTelegramMessages(quizId: string) {
+    return this.database
+      .select({ telegramMessageId: schema.rounds.telegramMessageId })
+      .from(schema.rounds)
+      .where(
+        and(eq(schema.rounds.quizId, quizId), sql`${schema.rounds.telegramMessageId} IS NOT NULL`),
+      )
+  }
+
+  async markQuizSummaryPublished(
+    quizId: string,
+    telegramMessageId: bigint,
+    now: Date,
+  ): Promise<boolean> {
+    const rows = await this.database
+      .update(schema.quizzes)
+      .set({ summaryTelegramMessageId: telegramMessageId, summaryPublishedAt: now })
+      .where(and(eq(schema.quizzes.id, quizId), isNull(schema.quizzes.summaryPublishedAt)))
+      .returning({ id: schema.quizzes.id })
     return rows.length > 0
   }
 
@@ -668,7 +812,7 @@ export class RoundService {
 function parseScoreTotal(value: string | number): number {
   const points = Number(value)
 
-  if (!Number.isSafeInteger(points) || points < 0) {
+  if (!Number.isSafeInteger(points)) {
     throw new Error('Score total is outside the supported integer range.')
   }
 
@@ -693,6 +837,8 @@ function resolveRoundRules(
     readonly mode: (typeof schema.questionMode.enumValues)[number]
     readonly presentationType: (typeof schema.questionPresentationType.enumValues)[number]
     readonly basePoints: number
+    readonly options: readonly schema.QuestionOption[] | null
+    readonly clueData: schema.ClueData | null
   },
   config: ProjectQuizConfig,
   configured: boolean,
@@ -701,10 +847,31 @@ function resolveRoundRules(
   readonly presentation: ProjectQuizConfig['presentation']
   readonly config?: ProjectQuizConfig
 } {
+  const difficulty = config.difficulty
+  const hasOptions = Boolean(question.options && question.options.length >= 2)
+  const hasClue = Boolean(question.clueData?.clues.length)
+  if (configured && (difficulty === 'EASY' || difficulty === 'MEDIUM') && !hasOptions) {
+    throw new RoundStartError(
+      `${difficulty} Project Quiz questions need approved answer options before they can start.`,
+    )
+  }
+  const presentation: ProjectQuizConfig['presentation'] =
+    (difficulty === 'EASY' || difficulty === 'MEDIUM') && hasOptions
+      ? 'multiple_choice'
+      : difficulty === 'HARD'
+        ? 'typed'
+        : hasOptions && question.presentationType === 'MCQ'
+          ? 'multiple_choice'
+          : 'typed'
+  const policyConfig = {
+    ...config,
+    presentation,
+    hintsEnabled: difficulty === 'EASY' && hasClue,
+  }
   if (configured) {
     return {
-      presentation: question.presentationType === 'MCQ' ? 'multiple_choice' : config.presentation,
-      config,
+      presentation,
+      config: policyConfig,
     }
   }
 
@@ -712,8 +879,8 @@ function resolveRoundRules(
     return {
       presentation: 'typed',
       config: {
-        ...config,
-        hintsEnabled: true,
+        ...policyConfig,
+        hintsEnabled: difficulty === 'EASY' && hasClue,
         startingPoints: 30,
         pointReductions: [0, 10, 20],
       },
@@ -722,11 +889,8 @@ function resolveRoundRules(
 
   if (useProjectQuizDefault) {
     return {
-      presentation:
-        question.presentationType === 'MCQ' || question.mode === 'QUICK'
-          ? 'multiple_choice'
-          : 'typed',
-      config: { ...config, startingPoints: question.basePoints },
+      presentation,
+      config: { ...policyConfig, startingPoints: question.basePoints },
     }
   }
 

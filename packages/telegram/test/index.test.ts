@@ -1,20 +1,77 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Update } from 'grammy/types'
 
-import { RALLYO_ADMIN_COMMANDS, RALLYO_GROUP_COMMANDS, RALLYO_PRIVATE_COMMANDS, createRallyoBot } from '../src'
+import {
+  RALLYO_ADMIN_COMMANDS,
+  RALLYO_GROUP_COMMANDS,
+  RALLYO_PRIVATE_COMMANDS,
+  configureRallyoBotCommands,
+  createRallyoBot,
+  helpCommandLines,
+} from '../src'
 
 describe('Rallyo grammY routing', () => {
   it('publishes focused slash-command menus for private chats, groups, and group admins', () => {
     expect(RALLYO_PRIVATE_COMMANDS.map(({ command }) => command)).toEqual([
-      'start',
       'help',
       'me',
+      'leaderboard',
+      'stats',
+      'tasks',
+      'submit',
       'pair',
     ])
     expect(RALLYO_GROUP_COMMANDS.map(({ command }) => command)).toContain('tasks')
     expect(RALLYO_GROUP_COMMANDS.map(({ command }) => command)).not.toContain('link')
     expect(RALLYO_ADMIN_COMMANDS.map(({ command }) => command)).toContain('settings')
-    expect(RALLYO_ADMIN_COMMANDS.map(({ command }) => command)).toContain('task_review')
+    expect(RALLYO_ADMIN_COMMANDS.map(({ command }) => command)).toEqual([
+      'help',
+      'me',
+      'leaderboard',
+      'stats',
+      'tasks',
+      'submit',
+      'game',
+      'stop',
+      'settings',
+      'award',
+    ])
+    expect(RALLYO_GROUP_COMMANDS.map(({ command }) => command)).not.toContain('wordseek')
+    expect(helpCommandLines()).toContain('/submit · submit task proof')
+    expect(helpCommandLines()).not.toContain('/task_review')
+    expect(helpCommandLines(true)).toContain('/game · configure and start a game')
+    expect(helpCommandLines(false, 'community')).not.toContain('/pair')
+    expect(helpCommandLines(false, 'community')).not.toContain('/game')
+    expect(helpCommandLines(true, 'communityAdmin')).toContain("/award · adjust a player's points")
+  })
+
+  it('registers the focused command registry for each Telegram scope', async () => {
+    const calls: unknown[] = []
+    const bot = {
+      api: {
+        setMyCommands: (commands: unknown, options: unknown) => {
+          calls.push({ commands, options })
+          return Promise.resolve(true)
+        },
+      },
+    } as never
+    await configureRallyoBotCommands(bot)
+    expect(calls).toHaveLength(3)
+    expect(
+      (calls[0] as { commands: readonly { command: string }[] }).commands.map(
+        ({ command }) => command,
+      ),
+    ).toEqual(RALLYO_PRIVATE_COMMANDS.map(({ command }) => command))
+    expect(
+      (calls[1] as { commands: readonly { command: string }[] }).commands.map(
+        ({ command }) => command,
+      ),
+    ).toEqual(RALLYO_GROUP_COMMANDS.map(({ command }) => command))
+    expect(
+      (calls[2] as { commands: readonly { command: string }[] }).commands.map(
+        ({ command }) => command,
+      ),
+    ).toEqual(RALLYO_ADMIN_COMMANDS.map(({ command }) => command))
   })
 
   it('delivers ordinary group text to the community text handler', async () => {
@@ -28,6 +85,10 @@ describe('Rallyo grammY routing', () => {
       onMe: handler,
       onLink: handler,
       onPair: handler,
+      onGame: handler,
+      onStop: handler,
+      onLeaderboard: handler,
+      onStats: handler,
       onWordSeek: handler,
       onWordSeekAdd: handler,
       onWordSeekWords: handler,

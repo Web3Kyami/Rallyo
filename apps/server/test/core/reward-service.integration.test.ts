@@ -132,7 +132,7 @@ describeDatabase('RewardService against PostgreSQL', () => {
     expect((await db.select().from(schema.seasons))[0]?.status).toBe('CLOSED')
   })
 
-  it('marks a failed sender for safe retry and never claims without a wallet', async () => {
+  it('marks a failed sender for safe retry and never claims before wallet connection', async () => {
     const service = new RewardService(db, () => {
       return Promise.reject(new Error('sender unavailable'))
     })
@@ -148,5 +148,20 @@ describeDatabase('RewardService against PostgreSQL', () => {
           .where(and(eq(schema.rewardEntitlements.id, ids.entitlement)))
       )[0]?.status,
     ).toBe('FAILED')
+  })
+
+  it('blocks an eligible reward before payout execution when no active wallet exists', async () => {
+    await db.delete(schema.walletIdentities).where(eq(schema.walletIdentities.id, ids.wallet))
+    const calls: string[] = []
+    const service = new RewardService(db, (input) => {
+      calls.push(input.idempotencyKey)
+      return Promise.resolve({ transactionHash: 'must-not-send' })
+    })
+
+    await expect(service.claim(ids.entitlement, now)).rejects.toThrow(
+      'Link a wallet before claiming this reward.',
+    )
+    expect(calls).toEqual([])
+    expect((await db.select().from(schema.rewardEntitlements))[0]?.status).toBe('ELIGIBLE')
   })
 })

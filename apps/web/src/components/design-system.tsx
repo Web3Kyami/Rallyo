@@ -609,12 +609,9 @@ export function StatusBanner({
 
 export function LoadingState({ label = 'Loading Rallyo' }: { readonly label?: string }) {
   return (
-    <div className="state-card state-card-loading" role="status" aria-live="polite">
-      <span className="state-mark state-mark-loading" aria-hidden="true" />
-      <div>
-        <strong>{label}</strong>
-        <p>Getting the latest state.</p>
-      </div>
+    <div className="rallyo-loading" role="status" aria-live="polite">
+      <span className="rallyo-loading-spinner" aria-hidden="true" />
+      <span>{label}…</span>
     </div>
   )
 }

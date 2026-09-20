@@ -102,6 +102,7 @@ export class WalletLinkService {
     readonly message: string
     readonly publicKey: string
     readonly signature: string
+    readonly format?: WalletSignatureFormat
     readonly now?: Date
   }) {
     const now = input.now ?? new Date()
@@ -122,6 +123,7 @@ export class WalletLinkService {
           publicKeyHex: input.publicKey,
           signatureHex: input.signature,
           expectedAddress: challenge.address,
+          ...(input.format ? { format: input.format } : {}),
         })
       ) {
         throw new WalletLinkError('Wallet signature verification failed.')
@@ -164,18 +166,34 @@ export function verifyNimiqWalletSignature(input: {
   readonly publicKeyHex: string
   readonly signatureHex: string
   readonly expectedAddress: string
+  readonly format?: WalletSignatureFormat
 }): boolean {
   try {
     const publicKey = PublicKey.fromHex(input.publicKeyHex)
     const signature = Signature.fromHex(input.signatureHex)
+    const format = input.format ?? 'mini-app'
+    if (format !== 'mini-app' && format !== 'hub') return false
+    const signedData =
+      format === 'hub'
+        ? nimiqHubSignedMessageHash(input.message)
+        : BufferUtils.fromUtf8(input.message)
     return (
       hash(input.message) === input.messageHash &&
-      publicKey.verify(signature, BufferUtils.fromUtf8(input.message)) &&
+      publicKey.verify(signature, signedData) &&
       publicKey.toAddress().toUserFriendlyAddress() === input.expectedAddress
     )
   } catch {
     return false
   }
+}
+
+export type WalletSignatureFormat = 'mini-app' | 'hub'
+
+export function nimiqHubSignedMessageHash(message: string): Uint8Array {
+  const prefix = '\u0016Nimiq Signed Message:\n'
+  return createHash('sha256')
+    .update(BufferUtils.fromUtf8(`${prefix}${message.length}${message}`))
+    .digest()
 }
 
 function randomCode(): string {

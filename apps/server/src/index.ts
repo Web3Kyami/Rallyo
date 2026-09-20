@@ -88,12 +88,14 @@ let pollingStarted = false
 const stopClueRevealScheduler = telegramRuntime?.startClueRevealScheduler() ?? null
 const stopScrambleScheduler = telegramRuntime?.startScrambleScheduler() ?? null
 const stopWordSeekTimeoutScheduler = telegramRuntime?.startWordSeekTimeoutScheduler() ?? null
+const stopQuizTimeoutScheduler = telegramRuntime?.startQuizTimeoutScheduler() ?? null
 const stopScheduleWorker = telegramRuntime?.startScheduleWorker() ?? null
 const shutdown = async () => {
   stopScheduleWorker?.()
   stopClueRevealScheduler?.()
   stopScrambleScheduler?.()
   stopWordSeekTimeoutScheduler?.()
+  stopQuizTimeoutScheduler?.()
   if (pollingStarted && telegramRuntime) {
     pollingStarted = false
     await telegramRuntime.bot.stop()

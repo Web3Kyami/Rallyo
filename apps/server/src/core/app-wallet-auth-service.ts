@@ -5,7 +5,11 @@ import { eq } from 'drizzle-orm'
 import type { RallyoDatabase } from '../db/client'
 import * as schema from '../db/schema'
 import { createAppSession } from './app-session-service'
-import { normalizeNimiqAddress, verifyNimiqWalletSignature } from './wallet-link-service'
+import {
+  normalizeNimiqAddress,
+  verifyNimiqWalletSignature,
+  type WalletSignatureFormat,
+} from './wallet-link-service'
 
 const APP_WALLET_CHALLENGE_TTL_MS = 5 * 60_000
 
@@ -49,6 +53,7 @@ export class AppWalletAuthService {
     readonly message: string
     readonly publicKey: string
     readonly signature: string
+    readonly format?: WalletSignatureFormat
     readonly now?: Date
   }) {
     const now = input.now ?? new Date()
@@ -70,6 +75,7 @@ export class AppWalletAuthService {
           publicKeyHex: input.publicKey,
           signatureHex: input.signature,
           expectedAddress: challenge.address,
+          ...(input.format ? { format: input.format } : {}),
         })
       ) {
         throw new AppWalletAuthError('Wallet signature verification failed.')

@@ -127,6 +127,15 @@ export class ScheduledQuizService {
     return row ?? null
   }
 
+  async get(quizId: string) {
+    const [quiz] = await this.database
+      .select()
+      .from(schema.quizzes)
+      .where(eq(schema.quizzes.id, quizId))
+      .limit(1)
+    return quiz ?? null
+  }
+
   async markLive(quizId: string) {
     await this.database
       .update(schema.quizzes)

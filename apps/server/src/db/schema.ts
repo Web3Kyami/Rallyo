@@ -524,6 +524,8 @@ export const quizzes = pgTable(
     startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
     perQuestionSeconds: integer('per_question_seconds').notNull(),
     status: quizStatus('status').notNull().default('DRAFT'),
+    summaryTelegramMessageId: bigint('summary_telegram_message_id', { mode: 'bigint' }),
+    summaryPublishedAt: timestamp('summary_published_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
   (table) => [
@@ -578,6 +580,7 @@ export const rounds = pgTable(
     difficulty: text('difficulty').notNull().default('MEDIUM'),
     scoredAt: timestamp('scored_at', { withTimezone: true }),
     telegramMessageId: bigint('telegram_message_id', { mode: 'bigint' }),
+    outcomeNotifiedAt: timestamp('outcome_notified_at', { withTimezone: true }),
     version: integer('version').notNull().default(0),
     createdAt: createdAt(),
   },
@@ -877,7 +880,7 @@ export const scoreEvents = pgTable(
     ),
     index('score_events_season_leaderboard_idx').on(table.communityId, table.seasonId, table.delta),
     index('score_events_player_xp_idx').on(table.playerId, table.createdAt),
-    check('score_events_delta_positive', sql`${table.delta} > 0`),
+    check('score_events_delta_nonzero', sql`${table.delta} <> 0`),
   ],
 )
 
@@ -906,7 +909,7 @@ export const manualScoreAwards = pgTable(
   (table) => [
     uniqueIndex('manual_score_awards_idempotency_key_unique').on(table.idempotencyKey),
     uniqueIndex('manual_score_awards_score_event_unique').on(table.scoreEventId),
-    check('manual_score_awards_points_positive', sql`${table.points} > 0`),
+    check('manual_score_awards_points_nonzero', sql`${table.points} <> 0`),
   ],
 )
 

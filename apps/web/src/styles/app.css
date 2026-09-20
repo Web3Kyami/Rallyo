@@ -2566,6 +2566,25 @@
   text-align: center;
 }
 
+.rallyo-loading {
+  display: flex;
+  min-height: 42vh;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 16px;
+}
+
+.rallyo-loading-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border-muted);
+  border-right-color: var(--ink);
+  border-radius: 50%;
+  animation: rallyo-spin 700ms linear infinite;
+}
+
 .loading-lines-mark {
   width: 16px;
   height: 16px;

@@ -5,7 +5,11 @@ import { eq, sql } from 'drizzle-orm'
 import { AppApiForbiddenError, AppApiService } from '../../src/core/app-api-service'
 import { AppWalletAuthService } from '../../src/core/app-wallet-auth-service'
 import { AppSessionError, AppSessionService } from '../../src/core/app-session-service'
-import { WalletLinkError, WalletLinkService } from '../../src/core/wallet-link-service'
+import {
+  nimiqHubSignedMessageHash,
+  WalletLinkError,
+  WalletLinkService,
+} from '../../src/core/wallet-link-service'
 import { createDatabase } from '../../src/db/client'
 import * as schema from '../../src/db/schema'
 
@@ -135,6 +139,28 @@ describeDatabase('Phase 8 identity amendment against PostgreSQL', () => {
         .where(eq(schema.telegramIdentities.playerId, completed.playerId)),
     ).toHaveLength(0)
     expect((await db.select().from(schema.appWalletChallenges))[0]?.consumedAt).not.toBeNull()
+  })
+
+  it('creates the same canonical browser session from a Hub signed message', async () => {
+    const keyPair = KeyPair.generate()
+    const address = keyPair.toAddress().toUserFriendlyAddress()
+    const challenge = await walletAuth.beginChallenge({ address, now })
+    const signature = keyPair.sign(nimiqHubSignedMessageHash(challenge.message))
+
+    const completed = await walletAuth.completeChallenge({
+      challengeId: challenge.challengeId,
+      message: challenge.message,
+      publicKey: keyPair.publicKey.toHex(),
+      signature: signature.toHex(),
+      format: 'hub',
+      now,
+    })
+
+    expect(await appSessions.getSession(completed.token, now)).toMatchObject({
+      playerId: completed.playerId,
+      telegramIdentityId: null,
+      targetMode: 'player',
+    })
   })
 
   it('authenticates an already linked wallet without creating another Player', async () => {
@@ -543,7 +569,7 @@ describeDatabase('Phase 8 identity amendment against PostgreSQL', () => {
     ).toBeNull()
   })
 
-  it('keeps a Telegram-connected session valid without a wallet', async () => {
+  it('keeps a Telegram-connected session valid before wallet connection', async () => {
     const session = await appSessions.createSession({
       playerId: ids.telegramPlayer,
       telegramIdentityId: ids.telegramIdentity,

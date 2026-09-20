@@ -50,8 +50,13 @@ export async function awardScoreEvent(
   database: ScoreEventExecutor,
   input: ScoreEventAwardInput,
 ): Promise<ScoreEventAwardResult> {
-  if (!Number.isSafeInteger(input.points) || input.points <= 0) {
-    throw new ScoreEventError('Score awards must use a positive safe integer.')
+  const validPoints = input.sourceType === 'MANUAL' ? input.points !== 0 : input.points > 0
+  if (!Number.isSafeInteger(input.points) || !validPoints) {
+    throw new ScoreEventError(
+      input.sourceType === 'MANUAL'
+        ? 'Manual score adjustments must use a non-zero safe integer.'
+        : 'Score awards must use a positive safe integer.',
+    )
   }
 
   const values = {

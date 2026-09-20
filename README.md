@@ -1,6 +1,6 @@
 # Rallyo
 
-Rallyo turns online communities into ongoing competitive social experiences. Communities run seasons, games, and contribution campaigns; members compete through participation and knowledge, build a persistent Rallyo identity, climb community rankings, and can connect Nimiq for wallet-backed rewards.
+Rallyo turns online communities into ongoing competitive social experiences. Communities run seasons, games, and contribution campaigns; members compete through participation and knowledge, build a persistent Rallyo identity, climb community rankings, and use Nimiq-backed identity for reward claims.
 
 Rallyo is prepared for the Nimiq Mini Apps Competition Cycle II.
 
@@ -19,8 +19,9 @@ Rallyo gives a community a shared competitive record across the places where its
 - Social tasks let members contribute through campaign or recurring work.
 - Positive score events from games, approved tasks, and authorized awards feed the same community record.
 - A player keeps one Rallyo identity across communities.
-- Wallet access is optional for play and ranking.
-- Nimiq Pay can provide wallet-backed entry, signed wallet identity, and reward context.
+- A Player identity can begin through Telegram or Nimiq.
+- A verified Nimiq wallet is required to claim any Rallyo or community reward. It provides wallet-backed identity, proof of wallet control, and the destination for a claim.
+- Players can answer games and build community points before connecting a wallet. Connect Nimiq before claiming rewards.
 
 The live interaction surface is Telegram. The Rallyo web app makes the record visible through player, community admin, and platform operator views.
 
@@ -45,7 +46,7 @@ flowchart LR
     W --> N[Nimiq wallet and reward context]
 ```
 
-Players can participate without a wallet. A Nimiq wallet becomes relevant when a player wants wallet-backed identity or a community has created a reward entitlement.
+Players can start through Telegram or Nimiq. Telegram remains sufficient for answering games and accumulating community points, while a verified Nimiq wallet is required for every reward claim.
 
 ## Community competition model
 
@@ -71,6 +72,12 @@ The current Telegram runtime includes three game families:
 
 Approved community content is selected before a live round starts. A live target remains stable while the round is in progress. Live scoring does not call an LLM.
 
+## Telegram commands
+
+The public menu is intentionally compact. Players use `/help`, `/me`, `/leaderboard`, `/stats`, `/tasks`, `/submit`, and `/pair`. Community admins also get `/game`, `/stop`, `/settings`, and `/award`.
+
+`/game` opens a short in-group controller for Quiz / Race, Word Seek, or Scramble. `/stop` closes the active Rallyo game in that community. `/award @username 10`, `/award @username -5 reason`, or a reply with `/award 10` records an auditable signed adjustment. The old low-level game and task commands remain hidden compatibility aliases where needed.
+
 ## Social contribution tasks
 
 Social tasks are a first-class part of Rallyo. An admin can publish a recurring task or a campaign task with instructions, points, an optional target, a proof type, and submission limits.
@@ -85,7 +92,7 @@ Players submit proof through the Telegram flow. A community admin reviews each s
 
 ## Nimiq integration
 
-Rallyo uses the Nimiq Mini App SDK for wallet-backed app entry and signed wallet identity.
+Rallyo uses the Nimiq Mini App SDK inside Nimiq Pay and the official Nimiq Hub API in normal browsers. Both flows request the same Rallyo server challenge, sign that exact challenge, verify ownership server-side, and create the same canonical wallet identity and Rallyo session. Rallyo never handles private keys.
 
 The implemented wallet flow is:
 
@@ -109,7 +116,7 @@ sequenceDiagram
     API-->>P: Open Rallyo Player app
 ```
 
-Wallet access is optional. Telegram players can enter through a short-lived session or pairing code, play, rank, and connect a wallet later. Pairing codes are one-time and expire after ten minutes; issuing a replacement code invalidates the previous active code for that Telegram identity. The app does not access private keys. Sensitive wallet actions stay inside the Nimiq Pay approval flow.
+Telegram players can enter through a short-lived session or pairing code and keep playing before wallet connection. Connect Nimiq before claiming rewards. Pairing codes are one-time and expire after ten minutes; issuing a replacement code invalidates the previous active code for that Telegram identity. In a normal browser, Hub `chooseAddress()` selects an account and Hub `signMessage()` signs the server challenge. Rallyo verifies the Hub signed-message prefix and hash, public key, derived address, challenge expiry, and one-time consumption. Choosing an address alone is never treated as authentication.
 
 The repository also contains a reward state machine for season entitlements. It covers eligibility, wallet requirements, per-claim and daily caps, idempotent entitlement creation, claim-in-progress state, failures, sent state, and confirmation. The current app API exposes reward entitlements and status, while reward sending is intentionally not exposed through the player app API. Treat live payout wiring and sender configuration as deployment work that must be verified separately.
 
@@ -124,7 +131,7 @@ flowchart LR
     C --> D[Climb the active season leaderboard]
     D --> E[Open Rallyo]
     E --> F[Review identity, communities, and global XP]
-    F --> G[Optionally link Nimiq]
+    F --> G[Connect Nimiq before claiming]
     G --> H[View eligible reward context]
 ```
 
@@ -173,16 +180,16 @@ The current implementation includes several safeguards around live community sta
 
 ## Technology
 
-| Layer    | Technology                          |
-| -------- | ----------------------------------- |
-| Runtime  | Node.js 22 or newer, TypeScript 5.9 |
-| Monorepo | npm workspaces                      |
-| Telegram | grammY                              |
-| API      | Fastify 5                           |
-| Database | PostgreSQL with Drizzle ORM         |
-| Web      | React 19 and Vite 8                 |
-| Wallet   | `@nimiq/mini-app-sdk`, Nimiq Core   |
-| Tests    | Vitest 5                            |
+| Layer    | Technology                                          |
+| -------- | --------------------------------------------------- |
+| Runtime  | Node.js 22 or newer, TypeScript 5.9                 |
+| Monorepo | npm workspaces                                      |
+| Telegram | grammY                                              |
+| API      | Fastify 5                                           |
+| Database | PostgreSQL with Drizzle ORM                         |
+| Web      | React 19 and Vite 8                                 |
+| Wallet   | `@nimiq/mini-app-sdk`, `@nimiq/hub-api`, Nimiq Core |
+| Tests    | Vitest 5                                            |
 
 ## Repository layout
 
@@ -245,7 +252,7 @@ npm run dev:web
 
 For local Telegram polling, set `TELEGRAM_TRANSPORT=polling`. Webhook mode requires a public HTTPS endpoint and `TELEGRAM_WEBHOOK_SECRET`. Typed Quiz/Race answers depend on Telegram delivering ordinary group messages, so BotFather privacy mode must allow those messages or Rallyo must have sufficient group access.
 
-The current `main` was verified against a disposable PostgreSQL database with migrations `0000` through `0016` applied. The full PostgreSQL-backed suite passed 27 test files and 149 tests; focused Telegram and pairing coverage passed 25 tests. Typecheck, lint, format checks, and the production web build also passed. A test run without `DATABASE_URL` skips database integration files, so it is not equivalent to the complete verification command above.
+The current `main` is verified against a disposable PostgreSQL database with migrations `0000` through `0017` applied. The complete verification run passed 28 test files and 158 tests. A test run without `DATABASE_URL` skips database integration files, so it is not equivalent to the complete verification command above.
 
 ## Open-source attribution
 

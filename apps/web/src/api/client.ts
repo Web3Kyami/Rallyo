@@ -241,6 +241,7 @@ export type WalletAuthCompletion = {
   readonly message: string
   readonly publicKey: string
   readonly signature: string
+  readonly format?: 'mini-app' | 'hub'
 }
 
 export type AppCommunity = {

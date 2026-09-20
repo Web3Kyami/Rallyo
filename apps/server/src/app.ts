@@ -136,10 +136,16 @@ export function buildServer(options: ServerOptions = {}) {
       },
     )
     app.post<{
-      Body: { challengeId?: string; message?: string; publicKey?: string; signature?: string }
+      Body: {
+        challengeId?: string
+        message?: string
+        publicKey?: string
+        signature?: string
+        format?: string
+      }
     }>('/api/wallet/complete', async (request, reply) => {
       setWalletCors(reply)
-      const { challengeId, message, publicKey, signature } = request.body ?? {}
+      const { challengeId, message, publicKey, signature, format } = request.body ?? {}
       if (
         ![challengeId, message, publicKey, signature].every((value) => typeof value === 'string')
       ) {
@@ -147,12 +153,16 @@ export function buildServer(options: ServerOptions = {}) {
           .code(400)
           .send({ error: 'challengeId, message, publicKey, and signature are required.' })
       }
+      if (format !== undefined && format !== 'mini-app' && format !== 'hub') {
+        return sendApiError(reply, 400, 'INVALID_REQUEST', 'Unsupported wallet signature format.')
+      }
       try {
         return await walletLinkService.completeChallenge({
           challengeId: challengeId as string,
           message: message as string,
           publicKey: publicKey as string,
           signature: signature as string,
+          ...(format === undefined ? {} : { format }),
         })
       } catch (error) {
         return reply
@@ -315,10 +325,16 @@ export function buildServer(options: ServerOptions = {}) {
       },
     )
     app.post<{
-      Body: { challengeId?: string; message?: string; publicKey?: string; signature?: string }
+      Body: {
+        challengeId?: string
+        message?: string
+        publicKey?: string
+        signature?: string
+        format?: string
+      }
     }>('/api/app/wallet/complete', async (request, reply) => {
       setWalletCors(reply)
-      const { challengeId, message, publicKey, signature } = request.body ?? {}
+      const { challengeId, message, publicKey, signature, format } = request.body ?? {}
       if (
         ![challengeId, message, publicKey, signature].every((value) => typeof value === 'string')
       ) {
@@ -329,12 +345,16 @@ export function buildServer(options: ServerOptions = {}) {
           'challengeId, message, publicKey, and signature are required.',
         )
       }
+      if (format !== undefined && format !== 'mini-app' && format !== 'hub') {
+        return sendApiError(reply, 400, 'INVALID_REQUEST', 'Unsupported wallet signature format.')
+      }
       try {
         const completed = await appWalletAuthService.completeChallenge({
           challengeId: challengeId as string,
           message: message as string,
           publicKey: publicKey as string,
           signature: signature as string,
+          ...(format === undefined ? {} : { format }),
         })
         reply.header(
           'set-cookie',

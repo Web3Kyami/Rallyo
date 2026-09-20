@@ -30,7 +30,8 @@ export function PublicHome() {
             </a>
           </div>
           <p className="landing-microcopy">
-            <Icon name="telegram" size={18} /> Games stay in Telegram. Wallet access stays optional.
+            <Icon name="telegram" size={18} /> Games stay in Telegram. Connect Nimiq before claiming
+            rewards.
           </p>
         </div>
         <div className="landing-hero-visual">
@@ -93,7 +94,7 @@ export function PublicHome() {
             <div className="landing-record-list">
               <RecordLine label="Community seasons" detail="Real points and ranks by community" />
               <RecordLine label="Contribution tasks" detail="Proof, review, and status" />
-              <RecordLine label="Rewards" detail="Optional wallet-backed claims" />
+              <RecordLine label="Rewards" detail="Nimiq is required before claiming" />
             </div>
           </div>
         </div>
@@ -140,8 +141,8 @@ export function PublicHome() {
             detail="Social tasks and manual review"
           />
           <AdminRow
-            title="Keep wallet-backed rewards optional."
-            detail="Nimiq when it adds something"
+            title="Require Nimiq for reward claims."
+            detail="Wallet-backed identity and claim destination"
           />
         </div>
       </section>
@@ -149,10 +150,10 @@ export function PublicHome() {
       <section className="landing-section landing-nimiq-section">
         <div className="landing-nimiq-copy">
           <p className="eyebrow">NIMIQ PAY</p>
-          <h2>Wallet when it helps. Rallyo always comes first.</h2>
+          <h2>Connect Nimiq for reward claims.</h2>
           <p>
-            Rallyo runs inside Nimiq Pay for wallet entry and reward actions. Telegram players can
-            join without a wallet.
+            Start through Telegram or Nimiq. Use Nimiq Pay or a normal browser to verify wallet
+            control before claiming a reward.
           </p>
           <Link className="button button-primary" to="/app/open">
             Open Rallyo
@@ -163,8 +164,8 @@ export function PublicHome() {
             <Icon name="wallet" size={24} />
           </div>
           <div>
-            <strong>Two ways in</strong>
-            <p>Pair Telegram in a browser, or continue with Nimiq Pay inside its Mini App.</p>
+            <strong>Two ways to connect</strong>
+            <p>Connect Nimiq in a normal browser or inside the Nimiq Pay Mini App.</p>
           </div>
         </div>
       </section>

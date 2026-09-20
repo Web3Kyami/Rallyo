@@ -153,6 +153,31 @@ export function renderProjectQuizAnswered(input: {
   return `<b>✅ CORRECT · PROJECT QUIZ</b>\n\n${escapeHtml(input.prompt)}\n\n${input.winnerMention ?? escapeHtml(input.winner)} got it first\n\nAnswer: <b>${escapeHtml(input.answer)}</b>\n\n<b>+${input.points} pts</b>${rank}`
 }
 
+export function renderQuizTimeout(input: {
+  readonly prompt: string
+  readonly answer: string
+}): string {
+  return `<b>⏱ TIME'S UP</b>\n\n${escapeHtml(input.prompt)}\n\nAnswer: <b>${escapeHtml(input.answer)}</b>`
+}
+
+export function renderQuizSummary(
+  rows: readonly {
+    readonly sequence: number
+    readonly prompt: string
+    readonly answer: string
+    readonly winner?: string
+    readonly points?: number | null
+  }[],
+): string {
+  const lines = rows.map((row) => {
+    const winner = row.winner
+      ? `Winner: ${row.winner}${row.points ? ` · +${row.points}` : ''}`
+      : 'No winner'
+    return `${row.sequence}. ${escapeHtml(row.prompt)}\nAnswer: <b>${escapeHtml(row.answer)}</b>\n${winner}`
+  })
+  return `<b>🏁 QUIZ COMPLETE</b>\n\n${lines.join('\n\n')}`
+}
+
 export function quickQuizKeyboard(roundId: string, options: readonly QuestionOption[]) {
   if (options.length === 0) {
     return undefined

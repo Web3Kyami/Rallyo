@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
-import { init } from '@nimiq/mini-app-sdk'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import {
@@ -31,7 +30,7 @@ import {
   Tabs,
   ToneBadge,
 } from '../components/design-system'
-import { detectEnvironment } from '../platform/environment'
+import { authenticateWithNimiq } from '../platform/wallet'
 import { useAppSession } from './session'
 import {
   avatarOptions,
@@ -119,7 +118,6 @@ function BackLink({
 }
 
 export function PlayerEntryPage() {
-  const environment = detectEnvironment()
   const session = useAppSession()
   const navigate = useNavigate()
   const [code, setCode] = useState('')
@@ -201,14 +199,8 @@ export function PlayerEntryPage() {
         {telegramStage === 'choice' ? (
           <>
             <div className="entry-primary-method is-wallet">
-              <SectionLabel>CONNECT NIMIQ PAY</SectionLabel>
-              {environment.isWalletProviderAvailable ? (
-                <WalletSignInButton enabled onAuthenticated={onWalletAuthenticated} />
-              ) : (
-                <p className="entry-note wallet-entry-unavailable">
-                  Wallet connection is available inside Nimiq Pay.
-                </p>
-              )}
+              <SectionLabel>CONNECT NIMIQ</SectionLabel>
+              <WalletSignInButton enabled onAuthenticated={onWalletAuthenticated} />
             </div>
             <div className="entry-secondary-method">
               <SectionLabel>CONNECT TELEGRAM</SectionLabel>
@@ -304,7 +296,7 @@ export function PlayerEntryPage() {
 function WalletSignInButton({
   disabledReason,
   enabled,
-  label = 'Continue with Nimiq Pay',
+  label = 'Connect Nimiq',
   onAuthenticated,
   variant = 'primary',
 }: {
@@ -320,7 +312,7 @@ function WalletSignInButton({
   if (!enabled) {
     return (
       <p className="entry-note wallet-entry-unavailable">
-        {disabledReason ?? 'Wallet connection is available inside Nimiq Pay.'}
+        {disabledReason ?? 'Connect Nimiq to continue.'}
       </p>
     )
   }
@@ -329,21 +321,7 @@ function WalletSignInButton({
     setState('signing')
     setError(null)
     try {
-      const provider = await init({ timeout: 10_000 })
-      await provider.connect()
-      const accounts = await provider.listAccounts()
-      if (!Array.isArray(accounts) || accounts.length === 0 || !accounts[0]) {
-        throw new Error('No Nimiq account is available in this wallet.')
-      }
-      const challenge = await api.walletChallenge(accounts[0])
-      const signed = await provider.sign(challenge.message)
-      if ('error' in signed) throw new Error(signed.error.message)
-      const result = await api.walletComplete({
-        challengeId: challenge.challengeId,
-        message: challenge.message,
-        publicKey: signed.publicKey,
-        signature: signed.signature,
-      })
+      const result = await authenticateWithNimiq()
       await onAuthenticated(result.redirectPath)
     } catch (reason: unknown) {
       setState('error')
@@ -1342,7 +1320,7 @@ export function PlayerProfilePage() {
     <PageFrame
       eyebrow="YOU"
       title="Your Rallyo identity"
-      detail="Telegram and Nimiq are connected methods for the same Player. Wallet access stays optional."
+      detail="Telegram and Nimiq are connected methods for the same Player. Nimiq is required before a reward can be claimed."
       action={
         <Button type="button" variant="secondary" onClick={() => void session.logout()}>
           Sign out
@@ -1395,9 +1373,11 @@ export function PlayerProfilePage() {
         </div>
         <div>
           <SectionLabel>NIMIQ WALLET</SectionLabel>
-          <h2>{wallet.linked ? 'Connected' : 'Optional'}</h2>
+          <h2>{wallet.linked ? 'Connected' : 'Not connected'}</h2>
           <p>
-            {wallet.linked ? shortAddress(wallet.address) : 'You can compete without a wallet.'}
+            {wallet.linked
+              ? '✅ Nimiq connected'
+              : 'Nimiq not connected. Connect Nimiq in Rallyo before claiming rewards.'}
           </p>
         </div>
         {wallet.linked ? (
@@ -1586,10 +1566,10 @@ export function PlayerRewardsPage() {
           rewards={result.data}
           walletSignIn={
             <WalletSignInButton
-              enabled={detectEnvironment().isWalletProviderAvailable}
+              enabled
               onAuthenticated={startWalletLink}
-              label="Link with Nimiq Pay"
-              disabledReason="Open Rallyo inside Nimiq Pay to link a wallet."
+              label="Connect Nimiq"
+              disabledReason="Connect Nimiq before claiming rewards."
             />
           }
         />
@@ -1611,8 +1591,8 @@ function RewardsContent({
         <StatusBanner
           tone="info"
           icon="wallet"
-          title="Wallet not linked"
-          detail="Link a wallet in Nimiq Pay when you are ready to claim a reward."
+          title="Nimiq connection required"
+          detail="This reward remains visible, but you must connect Nimiq before claiming it."
           action={walletSignIn}
         />
       ) : (

@@ -41,4 +41,10 @@ describe('shared game difficulty', () => {
       scrambleDifficultyPreset('HARD').minLength,
     )
   })
+
+  it('keeps quiz clue policy aligned with the presentation contract', () => {
+    expect(quizDifficultyPreset('EASY').hintsEnabled).toBe(true)
+    expect(quizDifficultyPreset('MEDIUM').hintsEnabled).toBe(false)
+    expect(quizDifficultyPreset('HARD').hintsEnabled).toBe(false)
+  })
 })

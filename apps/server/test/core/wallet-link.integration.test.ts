@@ -2,7 +2,11 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { KeyPair, BufferUtils } from '@nimiq/core'
 import { sql } from 'drizzle-orm'
 
-import { WalletLinkError, WalletLinkService } from '../../src/core/wallet-link-service'
+import {
+  nimiqHubSignedMessageHash,
+  WalletLinkError,
+  WalletLinkService,
+} from '../../src/core/wallet-link-service'
 import { createDatabase } from '../../src/db/client'
 import * as schema from '../../src/db/schema'
 
@@ -78,5 +82,37 @@ describeDatabase('WalletLinkService against PostgreSQL', () => {
       }),
     ).rejects.toThrow('Wallet signature verification failed.')
     expect(await db.select().from(schema.walletIdentities)).toHaveLength(0)
+  })
+
+  it('verifies the official Hub signed-message hash and rejects a raw message signature', async () => {
+    const keyPair = KeyPair.generate()
+    const address = keyPair.toAddress().toUserFriendlyAddress()
+    const issued = await service.issueCode({ telegramIdentityId: identityId, now })
+    const challenge = await service.beginChallenge({ code: issued.code, address, now })
+    const hubSignature = keyPair.sign(nimiqHubSignedMessageHash(challenge.message))
+
+    const linked = await service.completeChallenge({
+      challengeId: challenge.challengeId,
+      message: challenge.message,
+      publicKey: keyPair.publicKey.toHex(),
+      signature: hubSignature.toHex(),
+      format: 'hub',
+      now,
+    })
+    expect(linked.address).toBe(address)
+
+    const secondIssued = await service.issueCode({ telegramIdentityId: identityId, now })
+    const secondChallenge = await service.beginChallenge({ code: secondIssued.code, address, now })
+    const rawSignature = keyPair.sign(BufferUtils.fromUtf8(secondChallenge.message))
+    await expect(
+      service.completeChallenge({
+        challengeId: secondChallenge.challengeId,
+        message: secondChallenge.message,
+        publicKey: keyPair.publicKey.toHex(),
+        signature: rawSignature.toHex(),
+        format: 'hub',
+        now,
+      }),
+    ).rejects.toThrow('Wallet signature verification failed.')
   })
 })

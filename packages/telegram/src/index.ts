@@ -1,49 +1,161 @@
 import { Bot, type Context } from 'grammy'
 import type { Update } from 'grammy/types'
 
+type RallyoCommandDefinition = {
+  readonly command: string
+  readonly description: string
+  readonly helpSection: 'Play' | 'Account' | 'Admin'
+  readonly privatePlayer?: boolean
+  readonly community?: boolean
+  readonly communityAdmin?: boolean
+}
 
-
-export const RALLYO_PRIVATE_COMMANDS = [
-  { command: 'start', description: 'Open Rallyo and player actions' },
-  { command: 'help', description: 'Show the Rallyo guide' },
-  { command: 'me', description: 'Show your score and Rallyo status' },
-  { command: 'pair', description: 'Get a one-time Rallyo pairing code' },
+export const RALLYO_COMMAND_DEFINITIONS: readonly RallyoCommandDefinition[] = [
+  {
+    command: 'help',
+    description: 'the Rallyo guide',
+    helpSection: 'Play',
+    privatePlayer: true,
+    community: true,
+    communityAdmin: true,
+  },
+  {
+    command: 'me',
+    description: 'your Rallyo record',
+    helpSection: 'Play',
+    privatePlayer: true,
+    community: true,
+    communityAdmin: true,
+  },
+  {
+    command: 'leaderboard',
+    description: 'community ranking',
+    helpSection: 'Play',
+    privatePlayer: true,
+    community: true,
+    communityAdmin: true,
+  },
+  {
+    command: 'stats',
+    description: 'community competition stats',
+    helpSection: 'Play',
+    privatePlayer: true,
+    community: true,
+    communityAdmin: true,
+  },
+  {
+    command: 'tasks',
+    description: 'active tasks',
+    helpSection: 'Play',
+    privatePlayer: true,
+    community: true,
+    communityAdmin: true,
+  },
+  {
+    command: 'submit',
+    description: 'submit task proof',
+    helpSection: 'Play',
+    privatePlayer: true,
+    community: true,
+    communityAdmin: true,
+  },
+  {
+    command: 'pair',
+    description: 'connect Telegram to Rallyo',
+    helpSection: 'Account',
+    privatePlayer: true,
+  },
+  {
+    command: 'game',
+    description: 'configure and start a game',
+    helpSection: 'Admin',
+    communityAdmin: true,
+  },
+  {
+    command: 'stop',
+    description: 'stop the active game',
+    helpSection: 'Admin',
+    communityAdmin: true,
+  },
+  {
+    command: 'settings',
+    description: 'full community controls',
+    helpSection: 'Admin',
+    communityAdmin: true,
+  },
+  {
+    command: 'award',
+    description: "adjust a player's points",
+    helpSection: 'Admin',
+    communityAdmin: true,
+  },
 ]
 
-export const RALLYO_GROUP_COMMANDS = [
-  { command: 'help', description: 'Show the Rallyo guide' },
-  { command: 'me', description: 'Show your score and Rallyo status' },
-  { command: 'tasks', description: 'Show active community tasks' },
-  { command: 'task_submit', description: 'Submit proof for the selected task' },
-  { command: 'wordseek', description: 'Start or join Word Seek' },
-  { command: 'scramble', description: 'Start Scramble' },
-  { command: 'scramble_hint', description: 'Reveal the next Scramble hint' },
-]
+function commandsFor(scope: 'privatePlayer' | 'community' | 'communityAdmin') {
+  return RALLYO_COMMAND_DEFINITIONS.filter((definition) => definition[scope]).map(
+    ({ command, description }) => ({ command, description }),
+  )
+}
 
-export const RALLYO_ADMIN_COMMANDS = [
-  ...RALLYO_GROUP_COMMANDS,
-  { command: 'settings', description: 'Open community settings' },
-  { command: 'wordseek_add', description: 'Add a project word for Word Seek' },
-  { command: 'wordseek_words', description: 'Review Word Seek project words' },
-  { command: 'task_create', description: 'Create a social task' },
-  { command: 'task_review', description: 'Review social task submissions' },
-  { command: 'task_expire', description: 'Archive expired social tasks' },
-  { command: 'award', description: 'Award community points with a reason' },
-  { command: 'scramble_stop', description: 'Stop the active Scramble round' },
-]
+export const RALLYO_PRIVATE_COMMANDS = commandsFor('privatePlayer')
+export const RALLYO_GROUP_COMMANDS = commandsFor('community')
+export const RALLYO_ADMIN_COMMANDS = commandsFor('communityAdmin')
+
+export const RALLYO_HIDDEN_COMMANDS = [
+  'start',
+  'link',
+  'task_submit',
+  'task_create',
+  'task_review',
+  'task_expire',
+  'wordseek',
+  'wordseek_add',
+  'wordseek_words',
+  'scramble',
+  'scramble_stop',
+  'scramble_hint',
+] as const
+
+export function helpCommandLines(
+  isAdmin = false,
+  scope: 'privatePlayer' | 'community' | 'communityAdmin' = isAdmin
+    ? 'communityAdmin'
+    : 'privatePlayer',
+): string {
+  const visible = RALLYO_COMMAND_DEFINITIONS.filter((definition) => definition[scope])
+  const sections = (['Play', 'Account', 'Admin'] as const)
+    .map((section) => {
+      const commands = visible.filter((definition) => definition.helpSection === section)
+      if (commands.length === 0) return null
+      return [
+        `<b>${section}</b>`,
+        ...commands.map((definition) => `/${definition.command} · ${definition.description}`),
+      ].join('\n')
+    })
+    .filter((section): section is string => section !== null)
+
+  return ['<b>ℹ️ RALLYO</b>', '', ...sections].join('\n\n')
+}
 
 export async function configureRallyoBotCommands(bot: Bot): Promise<void> {
-  await Promise.all([
-    bot.api.setMyCommands(RALLYO_PRIVATE_COMMANDS, {
-      scope: { type: 'all_private_chats' },
-    }),
-    bot.api.setMyCommands(RALLYO_GROUP_COMMANDS, {
-      scope: { type: 'all_group_chats' },
-    }),
-    bot.api.setMyCommands(RALLYO_ADMIN_COMMANDS, {
-      scope: { type: 'all_chat_administrators' },
-    }),
-  ])
+  await bot.api.setMyCommands(RALLYO_PRIVATE_COMMANDS, {
+    scope: { type: 'all_private_chats' },
+  })
+  await bot.api.setMyCommands(RALLYO_GROUP_COMMANDS, {
+    scope: { type: 'all_group_chats' },
+  })
+  await bot.api.setMyCommands(RALLYO_ADMIN_COMMANDS, {
+    scope: { type: 'all_chat_administrators' },
+  })
+}
+
+export async function configureRallyoCommunityCommands(bot: Bot, chatId: number): Promise<void> {
+  await bot.api.setMyCommands(RALLYO_GROUP_COMMANDS, {
+    scope: { type: 'chat', chat_id: chatId },
+  })
+  await bot.api.setMyCommands(RALLYO_ADMIN_COMMANDS, {
+    scope: { type: 'chat_administrators', chat_id: chatId },
+  })
 }
 
 export type TelegramHandlers = {
@@ -54,6 +166,10 @@ export type TelegramHandlers = {
   readonly onMe: (context: Context) => Promise<void>
   readonly onLink: (context: Context) => Promise<void>
   readonly onPair: (context: Context) => Promise<void>
+  readonly onGame: (context: Context) => Promise<void>
+  readonly onStop: (context: Context) => Promise<void>
+  readonly onLeaderboard: (context: Context) => Promise<void>
+  readonly onStats: (context: Context) => Promise<void>
   readonly onWordSeek: (context: Context) => Promise<void>
   readonly onWordSeekAdd: (context: Context) => Promise<void>
   readonly onWordSeekWords: (context: Context) => Promise<void>
@@ -86,10 +202,15 @@ export function createRallyoBot(token: string, handlers: TelegramHandlers): Bot 
   bot.command('me', handlers.onMe)
   bot.command('link', handlers.onLink)
   bot.command('pair', handlers.onPair)
+  bot.command('game', handlers.onGame)
+  bot.command('stop', handlers.onStop)
+  bot.command('leaderboard', handlers.onLeaderboard)
+  bot.command('stats', handlers.onStats)
   bot.command('wordseek', handlers.onWordSeek)
   bot.command('wordseek_add', handlers.onWordSeekAdd)
   bot.command('wordseek_words', handlers.onWordSeekWords)
   bot.command('tasks', handlers.onTasks)
+  bot.command('submit', handlers.onTaskSubmit)
   bot.command('task_submit', handlers.onTaskSubmit)
   bot.command('task_create', handlers.onTaskCreate)
   bot.command('task_review', handlers.onTaskReview)

@@ -12,6 +12,7 @@ import {
   gamesKeyboard,
   helpMessage,
   pendingSocialTaskKeyboard,
+  parseManualAwardCommand,
   cleanupAdminWizardMessages,
   pointsKeyboard,
   questionCountKeyboard,
@@ -28,7 +29,9 @@ import {
   renderSocialTaskCard,
   renderSocialTaskDecisionNotification,
   renderTopCommunities,
+  socialTaskAnnouncementCaptions,
   socialTaskCardKeyboard,
+  announceSocialTask,
   taskActionKeyboard,
   taskCapKeyboard,
   taskConfirmKeyboard,
@@ -171,11 +174,30 @@ describe('Telegram admin keyboards', () => {
   })
 
   it('keeps onboarding and help copy focused on player actions', () => {
-    expect(startMessage()).toContain('play and rank without a wallet')
-    expect(startMessage()).toContain('Rallyo-native rewards')
-    expect(helpMessage()).toContain('<b>Games</b>')
+    expect(startMessage()).toContain('Connect Nimiq before claiming a Rallyo reward')
+    expect(helpMessage()).toContain('<b>Play</b>')
+    expect(helpMessage()).toContain('/leaderboard')
     expect(helpMessage()).not.toContain('/task_create')
-    expect(helpMessage(true)).toContain('/task_create')
+    expect(helpMessage(true)).toContain('/game')
+    expect(helpMessage(true)).not.toContain('/wordseek_add')
+  })
+
+  it('parses signed award syntax for usernames and reply targets', () => {
+    expect(parseManualAwardCommand('/award @alice 10 Great contribution', false)).toEqual({
+      explicitUsername: '@alice',
+      points: 10,
+      reason: 'Great contribution',
+    })
+    expect(parseManualAwardCommand('/award -5 Spam', true)).toEqual({
+      points: -5,
+      reason: 'Spam',
+    })
+    expect(parseManualAwardCommand('/award @alice +10', false)).toEqual({
+      explicitUsername: '@alice',
+      points: 10,
+      reason: 'Admin adjustment',
+    })
+    expect(parseManualAwardCommand('/award @alice 0', false)).toBeNull()
   })
 
   it('keeps social-task review callbacks compact', () => {
@@ -223,6 +245,43 @@ describe('Telegram admin keyboards', () => {
       `player:task:${task.id}`,
       'player:tasks',
     ])
+  })
+
+  it('keeps oversized media captions compact and falls back to text when artwork fails', async () => {
+    const task = {
+      id: '10000000-0000-4000-8000-000000000003',
+      title: 'Long task',
+      instructions: Array.from({ length: 10 }, () => 'x'.repeat(260)).join('\n'),
+      points: 25,
+      taskType: 'CAMPAIGN',
+      targetUrl: 'https://example.com/post',
+      announcementMediaFileId: null,
+      endsAt: new Date('2026-09-20T00:00:00.000Z'),
+    } as unknown as Parameters<typeof renderSocialTaskCard>[0]
+    const captions = socialTaskAnnouncementCaptions(task, new Date('2026-09-14T00:00:00.000Z'))
+    expect(captions.compact.length).toBeLessThanOrEqual(1_024)
+    expect(captions.detail.length).toBeGreaterThan(captions.compact.length)
+
+    const sendMessage = vi.fn().mockResolvedValue({ message_id: 4 })
+    const context = {
+      api: {
+        sendPhoto: vi.fn().mockRejectedValue(new Error('photo upload failed')),
+        sendMessage,
+      },
+    } as never
+    const announced = await announceSocialTask(
+      context,
+      { cacheAnnouncementMediaFileId: vi.fn() } as never,
+      { id: '20000000-0000-4000-8000-000000000001', title: 'Community', telegramChatId: 77n },
+      task,
+      new Date('2026-09-14T00:00:00.000Z'),
+    )
+    expect(announced).toBe(true)
+    expect(sendMessage).toHaveBeenCalledWith(
+      77,
+      expect.stringContaining('Long task'),
+      expect.any(Object),
+    )
   })
 
   it('renders approval and rejection notices for player DMs', () => {
