@@ -9,27 +9,43 @@ const HUB_ENDPOINT =
     ? import.meta.env.VITE_NIMIQ_HUB_URL
     : 'https://hub.nimiq.com'
 
-export async function authenticateWithNimiq(): Promise<{ readonly redirectPath: string }> {
+export type PreparedNimiqAuthentication = {
+  readonly requiresConfirmation: boolean
+  readonly confirm: () => Promise<{ readonly redirectPath: string }>
+}
+
+export async function prepareNimiqAuthentication(): Promise<PreparedNimiqAuthentication> {
   if (detectEnvironment().host === 'nimiq-pay') {
-    return authenticateInNimiqPay()
+    return { requiresConfirmation: false, confirm: authenticateInNimiqPay }
   }
 
   const hub = new HubApi(HUB_ENDPOINT)
   const selected = (await hub.chooseAddress({ appName: 'Rallyo' })) as { readonly address: string }
   const challenge = await api.walletChallenge(selected.address)
-  const signed = await hub.signMessage({
-    appName: 'Rallyo',
-    signer: selected.address,
-    message: challenge.message,
-  })
 
-  return api.walletComplete({
-    challengeId: challenge.challengeId,
-    message: challenge.message,
-    publicKey: bytesToHex(signed.signerPublicKey),
-    signature: bytesToHex(signed.signature),
-    format: 'hub',
-  })
+  return {
+    requiresConfirmation: true,
+    confirm: async () => {
+      const signed = await hub.signMessage({
+        appName: 'Rallyo',
+        signer: selected.address,
+        message: challenge.message,
+      })
+
+      return api.walletComplete({
+        challengeId: challenge.challengeId,
+        message: challenge.message,
+        publicKey: bytesToHex(signed.signerPublicKey),
+        signature: bytesToHex(signed.signature),
+        format: 'hub',
+      })
+    },
+  }
+}
+
+export async function authenticateWithNimiq(): Promise<{ readonly redirectPath: string }> {
+  const prepared = await prepareNimiqAuthentication()
+  return prepared.confirm()
 }
 
 async function authenticateInNimiqPay(): Promise<{ readonly redirectPath: string }> {

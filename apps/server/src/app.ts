@@ -311,15 +311,36 @@ export function buildServer(options: ServerOptions = {}) {
       async (request, reply) => {
         setWalletCors(reply)
         const address = request.body?.address
+        request.log.info(
+          {
+            route: '/api/app/wallet/challenge',
+            origin: request.headers.origin ?? null,
+            contentType: request.headers['content-type'] ?? null,
+            hasAddress: typeof address === 'string' && address.length > 0,
+          },
+          'wallet challenge request received',
+        )
         if (typeof address !== 'string' || address.length === 0) {
+          request.log.warn(
+            { route: '/api/app/wallet/challenge', reason: 'missing-address' },
+            'wallet challenge request rejected',
+          )
           return sendApiError(reply, 400, 'INVALID_REQUEST', 'A Nimiq address is required.')
         }
         try {
           return await appWalletAuthService.beginChallenge({ address })
         } catch (error) {
           if (error instanceof AppWalletAuthError) {
+            request.log.warn(
+              { route: '/api/app/wallet/challenge', reason: error.message },
+              'wallet challenge rejected',
+            )
             return sendApiError(reply, 400, 'WALLET_AUTH_FAILED', error.message)
           }
+          request.log.error(
+            { err: error, route: '/api/app/wallet/challenge' },
+            'wallet challenge server failure',
+          )
           return sendApiError(reply, 500, 'WALLET_AUTH_ERROR', 'Wallet sign-in could not start.')
         }
       },
@@ -335,9 +356,26 @@ export function buildServer(options: ServerOptions = {}) {
     }>('/api/app/wallet/complete', async (request, reply) => {
       setWalletCors(reply)
       const { challengeId, message, publicKey, signature, format } = request.body ?? {}
+      request.log.info(
+        {
+          route: '/api/app/wallet/complete',
+          origin: request.headers.origin ?? null,
+          contentType: request.headers['content-type'] ?? null,
+          format: format ?? 'default',
+          hasChallengeId: typeof challengeId === 'string' && challengeId.length > 0,
+          messageLength: typeof message === 'string' ? message.length : 0,
+          publicKeyLength: typeof publicKey === 'string' ? publicKey.length : 0,
+          signatureLength: typeof signature === 'string' ? signature.length : 0,
+        },
+        'wallet completion request received',
+      )
       if (
         ![challengeId, message, publicKey, signature].every((value) => typeof value === 'string')
       ) {
+        request.log.warn(
+          { route: '/api/app/wallet/complete', reason: 'missing-fields' },
+          'wallet completion request rejected',
+        )
         return sendApiError(
           reply,
           400,
@@ -346,6 +384,10 @@ export function buildServer(options: ServerOptions = {}) {
         )
       }
       if (format !== undefined && format !== 'mini-app' && format !== 'hub') {
+        request.log.warn(
+          { route: '/api/app/wallet/complete', reason: 'unsupported-format' },
+          'wallet completion request rejected',
+        )
         return sendApiError(reply, 400, 'INVALID_REQUEST', 'Unsupported wallet signature format.')
       }
       try {
@@ -367,8 +409,16 @@ export function buildServer(options: ServerOptions = {}) {
         }
       } catch (error) {
         if (error instanceof AppWalletAuthError) {
+          request.log.warn(
+            { route: '/api/app/wallet/complete', reason: error.message },
+            'wallet completion rejected',
+          )
           return sendApiError(reply, 400, 'WALLET_AUTH_FAILED', error.message)
         }
+        request.log.error(
+          { err: error, route: '/api/app/wallet/complete' },
+          'wallet completion server failure',
+        )
         return sendApiError(
           reply,
           500,

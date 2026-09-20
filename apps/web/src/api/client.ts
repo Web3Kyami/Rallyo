@@ -16,28 +16,51 @@ export class ApiError extends Error {
 }
 
 const apiBase = import.meta.env.DEV
-  ? (import.meta.env.VITE_API_BASE_URL ?? window.location.origin)
-  : window.location.origin
+  ? (import.meta.env.VITE_API_BASE_URL ?? getBrowserOrigin())
+  : getBrowserOrigin()
+
+function getBrowserOrigin(): string {
+  return typeof window === 'undefined' ? '' : window.location.origin
+}
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${apiBase}${path}`, {
-    ...init,
-    credentials: 'include',
-    headers: {
-      ...(init?.body ? { 'content-type': 'application/json' } : {}),
-      ...init?.headers,
-    },
-  })
+  let response: Response
+  try {
+    response = await fetch(`${apiBase}${path}`, {
+      ...init,
+      credentials: 'include',
+      headers: {
+        ...(init?.body ? { 'content-type': 'application/json' } : {}),
+        ...init?.headers,
+      },
+    })
+  } catch {
+    throw new ApiError(503, {
+      code: 'API_UNAVAILABLE',
+      message: 'Rallyo could not reach its service. Check your connection and try again.',
+    })
+  }
 
-  const payload = (await response.json().catch(() => null)) as
-    T | { readonly error?: ApiErrorShape } | null
+  const responseText = await response.text()
+  let payload: T | { readonly error?: ApiErrorShape } | null = null
+  if (responseText.length > 0) {
+    try {
+      payload = JSON.parse(responseText) as T | { readonly error?: ApiErrorShape }
+    } catch {
+      payload = null
+    }
+  }
   if (!response.ok) {
     const error =
       payload && typeof payload === 'object' && 'error' in payload ? payload.error : undefined
-    throw new ApiError(
-      response.status,
-      error ?? { code: 'HTTP_ERROR', message: 'Rallyo could not complete that request.' },
-    )
+    if (!error) {
+      console.warn('Rallyo API request failed', {
+        path,
+        status: response.status,
+        contentType: response.headers.get('content-type'),
+      })
+    }
+    throw new ApiError(response.status, error ?? safeHttpError(response.status))
   }
   if (payload === null) {
     throw new ApiError(502, {
@@ -46,6 +69,25 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     })
   }
   return payload as T
+}
+
+function safeHttpError(status: number): ApiErrorShape {
+  if (status >= 500) {
+    return {
+      code: 'API_UNAVAILABLE',
+      message: 'Rallyo’s service is unavailable right now. Please try again.',
+    }
+  }
+  if (status === 405) {
+    return {
+      code: 'API_ROUTE_UNAVAILABLE',
+      message: 'Rallyo could not reach the wallet service. Please try again later.',
+    }
+  }
+  return {
+    code: 'HTTP_ERROR',
+    message: `Rallyo rejected the request (HTTP ${status}). Please try again.`,
+  }
 }
 
 export const api = {

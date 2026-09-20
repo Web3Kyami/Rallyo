@@ -30,7 +30,7 @@ import {
   Tabs,
   ToneBadge,
 } from '../components/design-system'
-import { authenticateWithNimiq } from '../platform/wallet'
+import { prepareNimiqAuthentication } from '../platform/wallet'
 import { useAppSession } from './session'
 import {
   avatarOptions,
@@ -306,8 +306,11 @@ function WalletSignInButton({
   readonly onAuthenticated: (redirectPath: string) => Promise<void>
   readonly variant?: 'primary' | 'secondary'
 }) {
-  const [state, setState] = useState<'idle' | 'signing' | 'error'>('idle')
+  const [state, setState] = useState<'idle' | 'selecting' | 'ready' | 'signing' | 'error'>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [prepared, setPrepared] = useState<Awaited<
+    ReturnType<typeof prepareNimiqAuthentication>
+  > | null>(null)
 
   if (!enabled) {
     return (
@@ -317,17 +320,40 @@ function WalletSignInButton({
     )
   }
 
-  const signIn = async () => {
-    setState('signing')
+  const selectWallet = async () => {
+    setState('selecting')
     setError(null)
+    setPrepared(null)
     try {
-      const result = await authenticateWithNimiq()
+      const next = await prepareNimiqAuthentication()
+      if (next.requiresConfirmation) {
+        setPrepared(next)
+        setState('ready')
+        return
+      }
+      setState('signing')
+      const result = await next.confirm()
       await onAuthenticated(result.redirectPath)
     } catch (reason: unknown) {
       setState('error')
-      setError(reason instanceof Error ? reason.message : 'Nimiq sign-in could not be completed.')
+      setError(walletErrorMessage(reason))
     }
   }
+
+  const confirmWallet = async () => {
+    if (!prepared) return
+    setState('signing')
+    setError(null)
+    try {
+      const result = await prepared.confirm()
+      await onAuthenticated(result.redirectPath)
+    } catch (reason: unknown) {
+      setState('error')
+      setError(walletErrorMessage(reason))
+    }
+  }
+
+  const busy = state === 'selecting' || state === 'signing'
 
   return (
     <div className="wallet-entry-control">
@@ -335,11 +361,19 @@ function WalletSignInButton({
         type="button"
         variant={variant}
         icon="wallet"
-        loading={state === 'signing'}
-        onClick={() => void signIn()}
+        loading={busy}
+        onClick={() => void (state === 'ready' ? confirmWallet() : selectWallet())}
       >
-        {state === 'signing' ? 'Signing in' : label}
+        {state === 'selecting' ? 'Opening Nimiq' : null}
+        {state === 'signing' ? 'Signing in' : null}
+        {state === 'ready' ? 'Confirm with Nimiq' : null}
+        {state !== 'selecting' && state !== 'signing' && state !== 'ready' ? label : null}
       </Button>
+      {state === 'ready' ? (
+        <p className="entry-note">
+          Account selected. Confirm the signature with Nimiq to continue.
+        </p>
+      ) : null}
       {state === 'error' ? (
         <p className="entry-form-error" role="alert">
           {error}
@@ -347,6 +381,22 @@ function WalletSignInButton({
       ) : null}
     </div>
   )
+}
+
+function walletErrorMessage(reason: unknown): string {
+  if (reason instanceof Error) {
+    const message = reason.message.toLowerCase()
+    if (
+      message.includes('cancel') ||
+      message.includes('reject') ||
+      message.includes('denied') ||
+      message.includes('abort')
+    ) {
+      return 'Nimiq connection was cancelled.'
+    }
+    return reason.message
+  }
+  return 'Nimiq sign-in could not be completed. Please try again.'
 }
 
 export function PlayerAvatarOnboardingPage() {
