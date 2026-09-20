@@ -141,11 +141,12 @@ export function buildServer(options: ServerOptions = {}) {
         message?: string
         publicKey?: string
         signature?: string
+        signer?: string
         format?: string
       }
     }>('/api/wallet/complete', async (request, reply) => {
       setWalletCors(reply)
-      const { challengeId, message, publicKey, signature, format } = request.body ?? {}
+      const { challengeId, message, publicKey, signature, signer, format } = request.body ?? {}
       if (
         ![challengeId, message, publicKey, signature].every((value) => typeof value === 'string')
       ) {
@@ -156,12 +157,16 @@ export function buildServer(options: ServerOptions = {}) {
       if (format !== undefined && format !== 'mini-app' && format !== 'hub') {
         return sendApiError(reply, 400, 'INVALID_REQUEST', 'Unsupported wallet signature format.')
       }
+      if (format === 'hub' && (typeof signer !== 'string' || signer.length === 0)) {
+        return sendApiError(reply, 400, 'INVALID_REQUEST', 'Hub signer is required.')
+      }
       try {
         return await walletLinkService.completeChallenge({
           challengeId: challengeId as string,
           message: message as string,
           publicKey: publicKey as string,
           signature: signature as string,
+          ...(signer === undefined ? {} : { signer }),
           ...(format === undefined ? {} : { format }),
         })
       } catch (error) {
@@ -351,11 +356,12 @@ export function buildServer(options: ServerOptions = {}) {
         message?: string
         publicKey?: string
         signature?: string
+        signer?: string
         format?: string
       }
     }>('/api/app/wallet/complete', async (request, reply) => {
       setWalletCors(reply)
-      const { challengeId, message, publicKey, signature, format } = request.body ?? {}
+      const { challengeId, message, publicKey, signature, signer, format } = request.body ?? {}
       request.log.info(
         {
           route: '/api/app/wallet/complete',
@@ -390,12 +396,20 @@ export function buildServer(options: ServerOptions = {}) {
         )
         return sendApiError(reply, 400, 'INVALID_REQUEST', 'Unsupported wallet signature format.')
       }
+      if (format === 'hub' && (typeof signer !== 'string' || signer.length === 0)) {
+        request.log.warn(
+          { route: '/api/app/wallet/complete', reason: 'missing-hub-signer' },
+          'wallet completion request rejected',
+        )
+        return sendApiError(reply, 400, 'INVALID_REQUEST', 'Hub signer is required.')
+      }
       try {
         const completed = await appWalletAuthService.completeChallenge({
           challengeId: challengeId as string,
           message: message as string,
           publicKey: publicKey as string,
           signature: signature as string,
+          ...(signer === undefined ? {} : { signer }),
           ...(format === undefined ? {} : { format }),
         })
         reply.header(
@@ -409,10 +423,26 @@ export function buildServer(options: ServerOptions = {}) {
         }
       } catch (error) {
         if (error instanceof AppWalletAuthError) {
-          request.log.warn(
-            { route: '/api/app/wallet/complete', reason: error.message },
-            'wallet completion rejected',
-          )
+          if (error.walletVerification?.signatureFormat === 'hub') {
+            request.log.warn(
+              {
+                signatureFormat: error.walletVerification.signatureFormat,
+                publicKeyByteLength: error.walletVerification.publicKeyByteLength,
+                signatureByteLength: error.walletVerification.signatureByteLength,
+                normalizedExpectedAddress: error.walletVerification.normalizedExpectedAddress,
+                derivedPublicKeyAddress: error.walletVerification.derivedPublicKeyAddress,
+                submittedHubSignerAddress: error.walletVerification.submittedHubSignerAddress,
+                messageHashMatch: error.walletVerification.messageHashMatch,
+                cryptographicSignatureValid: error.walletVerification.cryptographicSignatureValid,
+              },
+              'Hub wallet signature verification failed',
+            )
+          } else {
+            request.log.warn(
+              { route: '/api/app/wallet/complete', reason: error.message },
+              'wallet completion rejected',
+            )
+          }
           return sendApiError(reply, 400, 'WALLET_AUTH_FAILED', error.message)
         }
         request.log.error(

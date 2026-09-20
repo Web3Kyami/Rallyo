@@ -16,6 +16,18 @@ export class WalletLinkError extends Error {
   }
 }
 
+export type WalletSignatureDiagnostics = {
+  readonly signatureFormat: WalletSignatureFormat
+  readonly publicKeyByteLength: number | null
+  readonly signatureByteLength: number | null
+  readonly normalizedExpectedAddress: string | null
+  readonly derivedPublicKeyAddress: string | null
+  readonly submittedHubSignerAddress: string | null
+  readonly messageHashMatch: boolean
+  readonly cryptographicSignatureValid: boolean
+  readonly valid: boolean
+}
+
 export class WalletLinkService {
   constructor(private readonly database: RallyoDatabase) {}
 
@@ -102,6 +114,7 @@ export class WalletLinkService {
     readonly message: string
     readonly publicKey: string
     readonly signature: string
+    readonly signer?: string
     readonly format?: WalletSignatureFormat
     readonly now?: Date
   }) {
@@ -122,6 +135,7 @@ export class WalletLinkService {
           messageHash: challenge.messageHash,
           publicKeyHex: input.publicKey,
           signatureHex: input.signature,
+          ...(input.signer === undefined ? {} : { signerAddress: input.signer }),
           expectedAddress: challenge.address,
           ...(input.format ? { format: input.format } : {}),
         })
@@ -165,35 +179,101 @@ export function verifyNimiqWalletSignature(input: {
   readonly messageHash: string
   readonly publicKeyHex: string
   readonly signatureHex: string
+  readonly signerAddress?: string
   readonly expectedAddress: string
   readonly format?: WalletSignatureFormat
 }): boolean {
-  try {
-    const publicKey = PublicKey.fromHex(input.publicKeyHex)
-    const signature = Signature.fromHex(input.signatureHex)
-    const format = input.format ?? 'mini-app'
-    if (format !== 'mini-app' && format !== 'hub') return false
-    const signedData =
-      format === 'hub'
-        ? nimiqHubSignedMessageHash(input.message)
-        : BufferUtils.fromUtf8(input.message)
-    return (
-      hash(input.message) === input.messageHash &&
-      publicKey.verify(signature, signedData) &&
-      publicKey.toAddress().toUserFriendlyAddress() === input.expectedAddress
-    )
-  } catch {
-    return false
-  }
+  return inspectNimiqWalletSignature(input).valid
 }
 
 export type WalletSignatureFormat = 'mini-app' | 'hub'
 
 export function nimiqHubSignedMessageHash(message: string): Uint8Array {
-  const prefix = '\u0016Nimiq Signed Message:\n'
-  return createHash('sha256')
-    .update(BufferUtils.fromUtf8(`${prefix}${message.length}${message}`))
-    .digest()
+  const messageBytes = BufferUtils.fromUtf8(message)
+  const prefixBytes = BufferUtils.fromUtf8('\u0016Nimiq Signed Message:\n')
+  const lengthBytes = BufferUtils.fromUtf8(String(messageBytes.length))
+  return createHash('sha256').update(prefixBytes).update(lengthBytes).update(messageBytes).digest()
+}
+
+export function inspectNimiqWalletSignature(input: {
+  readonly message: string
+  readonly messageHash: string
+  readonly publicKeyHex: string
+  readonly signatureHex: string
+  readonly signerAddress?: string
+  readonly expectedAddress: string
+  readonly format?: WalletSignatureFormat
+}): WalletSignatureDiagnostics {
+  const signatureFormat = input.format ?? 'mini-app'
+  const publicKeyByteLength = hexByteLength(input.publicKeyHex)
+  const signatureByteLength = hexByteLength(input.signatureHex)
+  const normalizedExpectedAddress = safeNormalizeAddress(input.expectedAddress)
+  const submittedHubSignerAddress = input.signerAddress
+    ? safeNormalizeAddress(input.signerAddress)
+    : null
+  const publicKey = parsePublicKey(input.publicKeyHex)
+  const signature = parseSignature(input.signatureHex)
+
+  const derivedPublicKeyAddress = publicKey
+    ? safeNormalizeAddress(publicKey.toAddress().toUserFriendlyAddress())
+    : null
+  const messageHashMatch = hash(input.message) === input.messageHash
+  let cryptographicSignatureValid = false
+  if (publicKey && signature) {
+    const signedData =
+      signatureFormat === 'hub'
+        ? nimiqHubSignedMessageHash(input.message)
+        : BufferUtils.fromUtf8(input.message)
+    cryptographicSignatureValid = publicKey.verify(signature, signedData)
+  }
+  const addressMatch =
+    normalizedExpectedAddress !== null &&
+    derivedPublicKeyAddress === normalizedExpectedAddress &&
+    (signatureFormat !== 'hub' || submittedHubSignerAddress === normalizedExpectedAddress)
+
+  return {
+    signatureFormat,
+    publicKeyByteLength,
+    signatureByteLength,
+    normalizedExpectedAddress,
+    derivedPublicKeyAddress,
+    submittedHubSignerAddress,
+    messageHashMatch,
+    cryptographicSignatureValid,
+    valid:
+      (signatureFormat === 'mini-app' || signatureFormat === 'hub') &&
+      messageHashMatch &&
+      cryptographicSignatureValid &&
+      addressMatch,
+  }
+}
+
+function safeNormalizeAddress(value: string): string | null {
+  try {
+    return normalizeNimiqAddress(value)
+  } catch {
+    return null
+  }
+}
+
+function hexByteLength(value: string): number | null {
+  return /^[0-9a-f]+$/i.test(value) && value.length % 2 === 0 ? value.length / 2 : null
+}
+
+function parsePublicKey(value: string): PublicKey | null {
+  try {
+    return PublicKey.fromHex(value)
+  } catch {
+    return null
+  }
+}
+
+function parseSignature(value: string): Signature | null {
+  try {
+    return Signature.fromHex(value)
+  } catch {
+    return null
+  }
 }
 
 function randomCode(): string {

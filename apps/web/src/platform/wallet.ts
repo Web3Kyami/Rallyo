@@ -20,7 +20,10 @@ export async function prepareNimiqAuthentication(): Promise<PreparedNimiqAuthent
   }
 
   const hub = new HubApi(HUB_ENDPOINT)
-  const selected = (await hub.chooseAddress({ appName: 'Rallyo' })) as { readonly address: string }
+  const selected = (await hub.chooseAddress({
+    appName: 'Rallyo',
+    disableContracts: true,
+  })) as { readonly address: string }
   const challenge = await api.walletChallenge(selected.address)
 
   return {
@@ -31,12 +34,20 @@ export async function prepareNimiqAuthentication(): Promise<PreparedNimiqAuthent
         signer: selected.address,
         message: challenge.message,
       })
+      if (
+        typeof signed.signer !== 'string' ||
+        normalizeAddressForComparison(signed.signer) !==
+          normalizeAddressForComparison(selected.address)
+      ) {
+        throw new Error('Nimiq returned a different account. Restart the connection.')
+      }
 
       return api.walletComplete({
         challengeId: challenge.challengeId,
         message: challenge.message,
         publicKey: bytesToHex(signed.signerPublicKey),
         signature: bytesToHex(signed.signature),
+        signer: signed.signer,
         format: 'hub',
       })
     },
@@ -71,4 +82,8 @@ async function authenticateInNimiqPay(): Promise<{ readonly redirectPath: string
 
 function bytesToHex(value: Uint8Array): string {
   return Array.from(value, (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function normalizeAddressForComparison(value: string): string {
+  return value.replace(/\s+/g, '').toUpperCase()
 }

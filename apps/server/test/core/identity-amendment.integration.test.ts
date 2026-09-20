@@ -152,6 +152,7 @@ describeDatabase('Phase 8 identity amendment against PostgreSQL', () => {
       message: challenge.message,
       publicKey: keyPair.publicKey.toHex(),
       signature: signature.toHex(),
+      signer: address,
       format: 'hub',
       now,
     })

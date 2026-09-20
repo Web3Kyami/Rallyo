@@ -96,6 +96,7 @@ describeDatabase('WalletLinkService against PostgreSQL', () => {
       message: challenge.message,
       publicKey: keyPair.publicKey.toHex(),
       signature: hubSignature.toHex(),
+      signer: address,
       format: 'hub',
       now,
     })
@@ -110,6 +111,7 @@ describeDatabase('WalletLinkService against PostgreSQL', () => {
         message: secondChallenge.message,
         publicKey: keyPair.publicKey.toHex(),
         signature: rawSignature.toHex(),
+        signer: address,
         format: 'hub',
         now,
       }),

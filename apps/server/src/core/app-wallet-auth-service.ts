@@ -7,16 +7,20 @@ import * as schema from '../db/schema'
 import { createAppSession } from './app-session-service'
 import {
   normalizeNimiqAddress,
-  verifyNimiqWalletSignature,
+  inspectNimiqWalletSignature,
+  type WalletSignatureDiagnostics,
   type WalletSignatureFormat,
 } from './wallet-link-service'
 
 const APP_WALLET_CHALLENGE_TTL_MS = 5 * 60_000
 
 export class AppWalletAuthError extends Error {
-  constructor(message: string) {
+  readonly walletVerification: WalletSignatureDiagnostics | undefined
+
+  constructor(message: string, walletVerification?: WalletSignatureDiagnostics) {
     super(message)
     this.name = 'AppWalletAuthError'
+    this.walletVerification = walletVerification
   }
 }
 
@@ -53,6 +57,7 @@ export class AppWalletAuthService {
     readonly message: string
     readonly publicKey: string
     readonly signature: string
+    readonly signer?: string
     readonly format?: WalletSignatureFormat
     readonly now?: Date
   }) {
@@ -68,17 +73,17 @@ export class AppWalletAuthService {
           'Wallet sign-in challenge is invalid, expired, or already used.',
         )
       }
-      if (
-        !verifyNimiqWalletSignature({
-          message: input.message,
-          messageHash: challenge.messageHash,
-          publicKeyHex: input.publicKey,
-          signatureHex: input.signature,
-          expectedAddress: challenge.address,
-          ...(input.format ? { format: input.format } : {}),
-        })
-      ) {
-        throw new AppWalletAuthError('Wallet signature verification failed.')
+      const verification = inspectNimiqWalletSignature({
+        message: input.message,
+        messageHash: challenge.messageHash,
+        publicKeyHex: input.publicKey,
+        signatureHex: input.signature,
+        expectedAddress: challenge.address,
+        ...(input.signer === undefined ? {} : { signerAddress: input.signer }),
+        ...(input.format ? { format: input.format } : {}),
+      })
+      if (!verification.valid) {
+        throw new AppWalletAuthError('Wallet signature verification failed.', verification)
       }
 
       const [existingWallet] = await tx

@@ -190,6 +190,21 @@ describe('server health', () => {
     expect(challenge.headers['access-control-allow-credentials']).toBe('true')
     expect(complete.statusCode).toBe(200)
     expect(complete.headers['set-cookie']).toContain('rallyo_session=wallet-session')
+    const missingHubSigner = await walletApp.inject({
+      method: 'POST',
+      url: '/api/app/wallet/complete',
+      payload: {
+        challengeId: 'wallet-challenge-1',
+        message: 'sign:NQ00',
+        publicKey: 'public-key',
+        signature: 'signature',
+        format: 'hub',
+      },
+    })
+    expect(missingHubSigner.statusCode).toBe(400)
+    expect(missingHubSigner.json()).toEqual({
+      error: { code: 'INVALID_REQUEST', message: 'Hub signer is required.' },
+    })
     await walletApp.close()
 
     const pairApp = buildServer({
