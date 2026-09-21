@@ -209,14 +209,46 @@ export function buildServer(options: ServerOptions = {}) {
       const sessionToken = readSessionCookie(request.headers.cookie)
       const code = request.body?.code
       if (!sessionToken || typeof code !== 'string' || code.length === 0) {
+        request.log.warn(
+          {
+            route: '/api/app/telegram/pair',
+            sessionPresent: Boolean(sessionToken),
+            pairingRowFound: false,
+            pairingExpired: false,
+            pairingConsumed: false,
+            currentPlayerId: null,
+            pairingTelegramPlayerId: null,
+            conflictCategory: 'invalid-request',
+          },
+          'Telegram pairing rejected',
+        )
         return sendApiError(reply, 400, 'INVALID_REQUEST', 'A Telegram pairing code is required.')
       }
       try {
         return await appSessionService.pairTelegram({ sessionToken, code })
       } catch (error) {
         if (error instanceof AppSessionError) {
+          request.log.warn(
+            {
+              route: '/api/app/telegram/pair',
+              ...(error.pairingDiagnostics ?? {
+                sessionPresent: true,
+                pairingRowFound: false,
+                pairingExpired: false,
+                pairingConsumed: false,
+                currentPlayerId: null,
+                pairingTelegramPlayerId: null,
+                conflictCategory: 'unknown',
+              }),
+            },
+            'Telegram pairing rejected',
+          )
           return sendApiError(reply, 400, 'TELEGRAM_PAIRING_FAILED', error.message)
         }
+        request.log.error(
+          { err: error, route: '/api/app/telegram/pair', sessionPresent: Boolean(sessionToken) },
+          'Telegram pairing server failure',
+        )
         return sendApiError(
           reply,
           500,

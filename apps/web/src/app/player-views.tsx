@@ -1345,14 +1345,7 @@ export function PlayerPairPage() {
             Codes expire after a short period and are consumed after a successful link.
           </p>
           <div className="pair-bot-actions">
-            <a
-              className="button button-outline"
-              href={RALLYO_TELEGRAM_BOT_URL}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Open Rallyo Bot
-            </a>
+            <TelegramBotAccess />
             <button className="text-button" type="button" onClick={() => setHelpOpen(true)}>
               Need a code?
             </button>
@@ -1641,27 +1634,68 @@ export function TelegramPairingHelpDialog({ onClose }: { readonly onClose: () =>
           <SectionLabel>CONNECT TELEGRAM</SectionLabel>
           <h2>Get a pairing code</h2>
           <ol>
-            <li>Open Rallyo Bot.</li>
+            <li>Copy or open {RALLYO_TELEGRAM_BOT_URL}.</li>
             <li>Send /pair.</li>
             <li>Copy the one-time code.</li>
             <li>Return to Rallyo and paste it here.</li>
           </ol>
-          <p>{RALLYO_TELEGRAM_BOT_USERNAME}</p>
+          <TelegramBotAccess />
         </div>
         <div className="daily-checkin-actions">
-          <a
-            className="button button-primary"
-            href={RALLYO_TELEGRAM_BOT_URL}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Open Rallyo Bot
-          </a>
           <button className="text-button" type="button" onClick={onClose}>
             Back to code entry
           </button>
         </div>
       </section>
+    </div>
+  )
+}
+
+export function TelegramBotAccess() {
+  const [copyMessage, setCopyMessage] = useState('Copy bot link')
+
+  const copyLink = async () => {
+    let copied = false
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API is unavailable.')
+      await navigator.clipboard.writeText(RALLYO_TELEGRAM_BOT_URL)
+      copied = true
+    } catch {
+      try {
+        const textarea = document.createElement('textarea')
+        textarea.value = RALLYO_TELEGRAM_BOT_URL
+        textarea.setAttribute('readonly', '')
+        textarea.style.position = 'fixed'
+        textarea.style.opacity = '0'
+        document.body.append(textarea)
+        textarea.select()
+        copied = document.execCommand('copy')
+        textarea.remove()
+      } catch {
+        copied = false
+      }
+    }
+    setCopyMessage(copied ? 'Copied' : 'Copy the link above')
+    window.setTimeout(() => setCopyMessage('Copy bot link'), 1_500)
+  }
+
+  return (
+    <div className="telegram-bot-access">
+      <p className="telegram-bot-username">{RALLYO_TELEGRAM_BOT_USERNAME}</p>
+      <p className="telegram-bot-url">{RALLYO_TELEGRAM_BOT_URL}</p>
+      <div className="pair-bot-actions">
+        <a
+          className="button button-outline"
+          href={RALLYO_TELEGRAM_BOT_URL}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open Rallyo Bot
+        </a>
+        <button className="text-button" type="button" onClick={() => void copyLink()}>
+          {copyMessage}
+        </button>
+      </div>
     </div>
   )
 }

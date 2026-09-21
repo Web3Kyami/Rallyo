@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 
-import { and, eq, gt, isNull, sql } from 'drizzle-orm'
+import { and, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
 
 import type { RallyoDatabase } from '../db/client'
 import * as schema from '../db/schema'
@@ -38,10 +38,24 @@ export type AppSessionIssued = {
 }
 
 export class AppSessionError extends Error {
-  constructor(message: string) {
+  readonly pairingDiagnostics: PairingDiagnostics | undefined
+
+  constructor(message: string, pairingDiagnostics?: PairingDiagnostics) {
     super(message)
     this.name = 'AppSessionError'
+    this.pairingDiagnostics = pairingDiagnostics
   }
+}
+
+export type PairingDiagnostics = {
+  readonly sessionPresent: boolean
+  readonly pairingRowFound: boolean
+  readonly pairingExpired: boolean
+  readonly pairingConsumed: boolean
+  readonly currentPlayerId: string | null
+  readonly pairingTelegramPlayerId: string | null
+  readonly conflictCategory:
+    'none' | 'session-telegram-conflict' | 'wallet-conflict' | 'identity-merge-conflict'
 }
 
 export class AppSessionService {
@@ -247,13 +261,14 @@ export class AppSessionService {
     readonly now?: Date
   }): Promise<{ readonly playerId: string; readonly redirectPath: string }> {
     const now = input.now ?? new Date()
-    if (
-      !input.sessionToken ||
-      input.sessionToken.length > 300 ||
-      !input.code ||
-      input.code.length > 100
-    ) {
-      throw new AppSessionError('The app session or Telegram pairing code is invalid.')
+    const codeCandidates = pairingCodeCandidates(input.code)
+    if (!input.sessionToken || input.sessionToken.length > 300) {
+      throw pairingError('Your Rallyo session expired. Sign in again, then enter a new code.', {
+        sessionPresent: false,
+      })
+    }
+    if (codeCandidates.length === 0) {
+      throw pairingError('Enter the pairing code from Rallyo Bot.', { sessionPresent: true })
     }
 
     try {
@@ -269,30 +284,70 @@ export class AppSessionService {
             ),
           )
           .for('update')
-        if (!session) throw new AppSessionError('The app session is invalid or expired.')
+        if (!session) {
+          throw pairingError('Your Rallyo session expired. Sign in again, then enter a new code.', {
+            sessionPresent: false,
+          })
+        }
 
-        const [pairing] = await tx
+        const codeHashes = codeCandidates.map(hash)
+        const pairings = await tx
           .select()
           .from(schema.telegramPairingCodes)
-          .where(
-            and(
-              eq(schema.telegramPairingCodes.codeHash, hash(input.code)),
-              isNull(schema.telegramPairingCodes.consumedAt),
-              gt(schema.telegramPairingCodes.expiresAt, now),
-            ),
-          )
+          .where(inArray(schema.telegramPairingCodes.codeHash, codeHashes))
           .for('update')
-        if (!pairing) throw new AppSessionError('Telegram pairing code is invalid or expired.')
+        const pairing = codeHashes
+          .map((codeHash) => pairings.find((candidate) => candidate.codeHash === codeHash))
+          .find((candidate) => candidate !== undefined)
+        const diagnostics = {
+          sessionPresent: true,
+          pairingRowFound: Boolean(pairing),
+          pairingExpired: Boolean(pairing && pairing.expiresAt <= now),
+          pairingConsumed: Boolean(pairing?.consumedAt),
+          currentPlayerId: session.playerId,
+          pairingTelegramPlayerId: null,
+          conflictCategory: 'none' as const,
+        }
+        if (!pairing) {
+          throw pairingError(
+            'That pairing code is not valid. Send /pair in Rallyo Bot for a new code.',
+            diagnostics,
+          )
+        }
+        if (pairing.consumedAt) {
+          throw pairingError(
+            'That pairing code was already used or replaced. Send /pair in Rallyo Bot for a new code.',
+            diagnostics,
+          )
+        }
+        if (pairing.expiresAt <= now) {
+          throw pairingError(
+            'That pairing code expired. Send /pair in Rallyo Bot for a new code.',
+            diagnostics,
+          )
+        }
 
         const [identity] = await tx
           .select()
           .from(schema.telegramIdentities)
           .where(eq(schema.telegramIdentities.id, pairing.telegramIdentityId))
           .for('update')
-        if (!identity) throw new AppSessionError('Telegram identity no longer exists.')
+        if (!identity) {
+          throw pairingError(
+            'This Telegram identity is no longer available. Send /pair for a new code.',
+            diagnostics,
+          )
+        }
+        const identityDiagnostics = {
+          ...diagnostics,
+          pairingTelegramPlayerId: identity.playerId,
+        }
 
         if (session.telegramIdentityId && session.telegramIdentityId !== identity.id) {
-          throw new AppSessionError('This Rallyo Player already has a different Telegram identity.')
+          throw pairingError(
+            'This Rallyo Player already has a different Telegram account connected.',
+            { ...identityDiagnostics, conflictCategory: 'session-telegram-conflict' },
+          )
         }
 
         let playerId = session.playerId
@@ -300,12 +355,28 @@ export class AppSessionService {
           if (session.telegramIdentityId) {
             throw new AppSessionError('Two Telegram identities cannot be merged automatically.')
           }
-          const merged = await mergeWalletPlayerIntoTelegramPlayer(tx, {
-            telegramPlayerId: identity.playerId,
-            walletPlayerId: session.playerId,
-            now,
-          })
-          playerId = merged.playerId
+          try {
+            const merged = await mergeWalletPlayerIntoTelegramPlayer(tx, {
+              telegramPlayerId: identity.playerId,
+              walletPlayerId: session.playerId,
+              now,
+            })
+            playerId = merged.playerId
+          } catch (error) {
+            if (error instanceof IdentityMergeConflictError) {
+              const walletConflict = error.message.includes('different wallet identity')
+              throw pairingError(
+                walletConflict
+                  ? 'This Telegram account is already connected to another Nimiq wallet. Use your existing wallet or recover the account before changing wallets.'
+                  : 'These Rallyo accounts need operator review before they can be connected.',
+                {
+                  ...identityDiagnostics,
+                  conflictCategory: walletConflict ? 'wallet-conflict' : 'identity-merge-conflict',
+                },
+              )
+            }
+            throw error
+          }
         }
 
         await tx
@@ -321,7 +392,6 @@ export class AppSessionService {
       })
     } catch (error) {
       if (error instanceof AppSessionError) throw error
-      if (error instanceof IdentityMergeConflictError) throw new AppSessionError(error.message)
       throw error
     }
   }
@@ -413,7 +483,7 @@ export async function issueTelegramPairingCode(
       )
   }
 
-  const code = randomPairingCode()
+  const code = normalizePairingCode(randomPairingCode())
   const [row] = await database
     .insert(schema.telegramPairingCodes)
     .values({
@@ -512,7 +582,31 @@ function randomToken(): string {
 }
 
 function randomPairingCode(): string {
-  return randomBytes(5).toString('base64url').slice(0, 8).toUpperCase()
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  return Array.from(randomBytes(8), (byte) => alphabet[byte % alphabet.length]).join('')
+}
+
+export function normalizePairingCode(value: string): string {
+  return value.trim().replace(/\s+/gu, '').toUpperCase()
+}
+
+function pairingCodeCandidates(value: string): readonly string[] {
+  if (!value || value.length > 100) return []
+  const normalized = normalizePairingCode(value)
+  const legacy = value.trim()
+  return [...new Set([normalized, legacy].filter((candidate) => candidate.length > 0))]
+}
+
+function pairingError(message: string, input: Partial<PairingDiagnostics>): AppSessionError {
+  return new AppSessionError(message, {
+    sessionPresent: input.sessionPresent ?? false,
+    pairingRowFound: input.pairingRowFound ?? false,
+    pairingExpired: input.pairingExpired ?? false,
+    pairingConsumed: input.pairingConsumed ?? false,
+    currentPlayerId: input.currentPlayerId ?? null,
+    pairingTelegramPlayerId: input.pairingTelegramPlayerId ?? null,
+    conflictCategory: input.conflictCategory ?? 'none',
+  })
 }
 
 function normalizeTelegramUsername(value: string): string {

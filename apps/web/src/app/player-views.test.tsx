@@ -3,7 +3,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 
 import type { AppBootstrap } from '../api/client'
-import { PlayerProfilePage, TelegramPairingHelpDialog } from './player-views'
+import { PlayerProfilePage, TelegramBotAccess, TelegramPairingHelpDialog } from './player-views'
 import { SessionContext } from './session'
 
 const bootstrap: AppBootstrap = {
@@ -72,5 +72,15 @@ describe('player identity and Telegram pairing UI', () => {
     expect(markup).toContain('Send /pair')
     expect(markup).toContain('@Rallyo_gamebot')
     expect(markup).toContain('https://t.me/Rallyo_gamebot')
+    expect(markup).toContain('Copy bot link')
+  })
+
+  it('keeps the Telegram bot username and URL visible beside open and copy actions', () => {
+    const markup = renderToStaticMarkup(<TelegramBotAccess />)
+
+    expect(markup).toContain('@Rallyo_gamebot')
+    expect(markup).toContain('https://t.me/Rallyo_gamebot')
+    expect(markup).toContain('Open Rallyo Bot')
+    expect(markup).toContain('Copy bot link')
   })
 })

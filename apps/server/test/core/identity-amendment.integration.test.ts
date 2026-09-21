@@ -615,7 +615,7 @@ describeDatabase('Phase 8 identity amendment against PostgreSQL', () => {
     })
     const result = await appSessions.pairTelegram({
       sessionToken: session.token,
-      code: pairing.code,
+      code: ` \n${pairing.code.toLowerCase()}\t`,
       now,
     })
 
@@ -691,7 +691,7 @@ describeDatabase('Phase 8 identity amendment against PostgreSQL', () => {
         code: expired.code,
         now: new Date(now.getTime() + 10 * 60_000 + 1),
       }),
-    ).rejects.toThrow('invalid or expired')
+    ).rejects.toThrow('expired')
 
     const valid = await appSessions.issueTelegramPairingCode({
       telegramIdentityId: ids.telegramIdentity,
@@ -700,7 +700,34 @@ describeDatabase('Phase 8 identity amendment against PostgreSQL', () => {
     await appSessions.pairTelegram({ sessionToken: session.token, code: valid.code, now })
     await expect(
       appSessions.pairTelegram({ sessionToken: session.token, code: valid.code, now }),
-    ).rejects.toThrow('invalid or expired')
+    ).rejects.toThrow('already used or replaced')
+  })
+
+  it('does not replace a Telegram Player wallet when pairing from another wallet Player', async () => {
+    const otherWallet = KeyPair.generate()
+    await db.insert(schema.walletIdentities).values({
+      playerId: ids.telegramPlayer,
+      address: otherWallet.toAddress().toUserFriendlyAddress(),
+      publicKey: otherWallet.publicKey.toHex(),
+    })
+    const session = await appSessions.createSession({ playerId: ids.walletPlayer, now })
+    const pairing = await appSessions.issueTelegramPairingCode({
+      telegramIdentityId: ids.telegramIdentity,
+      now,
+    })
+
+    await expect(
+      appSessions.pairTelegram({ sessionToken: session.token, code: pairing.code, now }),
+    ).rejects.toThrow('already connected to another Nimiq wallet')
+    expect(
+      await db.select({ playerId: schema.walletIdentities.playerId }).from(schema.walletIdentities),
+    ).toEqual(
+      expect.arrayContaining([{ playerId: ids.telegramPlayer }, { playerId: ids.walletPlayer }]),
+    )
+    expect(
+      (await db.select().from(schema.telegramPairingCodes)).find((row) => row.id === pairing.id)
+        ?.consumedAt,
+    ).toBeNull()
   })
 
   it('rejects duplicate wallet attachment and duplicate Telegram ownership', async () => {
@@ -739,7 +766,7 @@ describeDatabase('Phase 8 identity amendment against PostgreSQL', () => {
         code: secondPairing.code,
         now,
       }),
-    ).rejects.toThrow('different Telegram identity')
+    ).rejects.toThrow('different Telegram account connected')
     expect(
       (await db.select().from(schema.telegramPairingCodes)).find(
         (row) => row.id === secondPairing.id,
@@ -905,7 +932,7 @@ describeDatabase('Phase 8 identity amendment against PostgreSQL', () => {
 
     await expect(
       appSessions.pairTelegram({ sessionToken: session.token, code: pairing.code, now }),
-    ).rejects.toThrow('Reward entitlement values conflict')
+    ).rejects.toThrow('need operator review')
     expect(await db.select().from(schema.players)).toHaveLength(4)
     expect(
       await db
