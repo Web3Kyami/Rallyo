@@ -13,7 +13,7 @@ type SessionContextValue = SessionState & {
   readonly logout: () => Promise<void>
 }
 
-const SessionContext = createContext<SessionContextValue | null>(null)
+export const SessionContext = createContext<SessionContextValue | null>(null)
 
 export function SessionProvider({ children }: { readonly children: React.ReactNode }) {
   const [state, setState] = useState<SessionState>({ status: 'loading', data: null, error: null })

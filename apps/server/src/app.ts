@@ -362,6 +362,9 @@ export function buildServer(options: ServerOptions = {}) {
     }>('/api/app/wallet/complete', async (request, reply) => {
       setWalletCors(reply)
       const { challengeId, message, publicKey, signature, signer, format } = request.body ?? {}
+      const authenticatedSession = appSessionService
+        ? await appSessionService.getSession(readSessionCookie(request.headers.cookie))
+        : null
       request.log.info(
         {
           route: '/api/app/wallet/complete',
@@ -411,6 +414,16 @@ export function buildServer(options: ServerOptions = {}) {
           signature: signature as string,
           ...(signer === undefined ? {} : { signer }),
           ...(format === undefined ? {} : { format }),
+          ...(authenticatedSession
+            ? {
+                authenticatedSession: {
+                  playerId: authenticatedSession.playerId,
+                  telegramIdentityId: authenticatedSession.telegramIdentityId,
+                  targetCommunityId: authenticatedSession.targetCommunityId,
+                  targetMode: authenticatedSession.targetMode,
+                },
+              }
+            : {}),
         })
         reply.header(
           'set-cookie',
@@ -439,7 +452,11 @@ export function buildServer(options: ServerOptions = {}) {
             )
           } else {
             request.log.warn(
-              { route: '/api/app/wallet/complete', reason: error.message },
+              {
+                route: '/api/app/wallet/complete',
+                authenticatedPlayerId: authenticatedSession?.playerId ?? null,
+                reason: error.message,
+              },
               'wallet completion rejected',
             )
           }

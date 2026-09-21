@@ -4,7 +4,11 @@ import { eq } from 'drizzle-orm'
 
 import type { RallyoDatabase } from '../db/client'
 import * as schema from '../db/schema'
-import { createAppSession } from './app-session-service'
+import { createAppSession, type AppSessionActor } from './app-session-service'
+import {
+  IdentityMergeConflictError,
+  mergeWalletPlayerIntoTelegramPlayer,
+} from './identity-merge-service'
 import {
   normalizeNimiqAddress,
   inspectNimiqWalletSignature,
@@ -13,6 +17,8 @@ import {
 } from './wallet-link-service'
 
 const APP_WALLET_CHALLENGE_TTL_MS = 5 * 60_000
+
+type WalletAuthDatabaseExecutor = Pick<RallyoDatabase, 'select' | 'insert' | 'update' | 'delete'>
 
 export class AppWalletAuthError extends Error {
   readonly walletVerification: WalletSignatureDiagnostics | undefined
@@ -59,6 +65,10 @@ export class AppWalletAuthService {
     readonly signature: string
     readonly signer?: string
     readonly format?: WalletSignatureFormat
+    readonly authenticatedSession?: Pick<
+      AppSessionActor,
+      'playerId' | 'telegramIdentityId' | 'targetCommunityId' | 'targetMode'
+    >
     readonly now?: Date
   }) {
     const now = input.now ?? new Date()
@@ -93,7 +103,15 @@ export class AppWalletAuthService {
         .for('update')
 
       let playerId: string
-      if (existingWallet) {
+      if (input.authenticatedSession) {
+        playerId = await attachWalletToAuthenticatedPlayer(tx, {
+          currentPlayerId: input.authenticatedSession.playerId,
+          existingWallet,
+          address: challenge.address,
+          publicKey: input.publicKey,
+          now,
+        })
+      } else if (existingWallet) {
         if (existingWallet.revokedAt) {
           throw new AppWalletAuthError(
             'This wallet needs an operator-assisted recovery before sign-in.',
@@ -133,13 +151,115 @@ export class AppWalletAuthService {
         }
       }
 
-      const session = await createAppSession(tx, { playerId, now })
+      const session = await createAppSession(tx, {
+        playerId,
+        ...(input.authenticatedSession?.telegramIdentityId !== undefined
+          ? { telegramIdentityId: input.authenticatedSession.telegramIdentityId }
+          : {}),
+        ...(input.authenticatedSession?.targetCommunityId !== undefined
+          ? { targetCommunityId: input.authenticatedSession.targetCommunityId }
+          : {}),
+        ...(input.authenticatedSession?.targetMode !== undefined
+          ? { targetMode: input.authenticatedSession.targetMode }
+          : {}),
+        now,
+      })
       await tx
         .update(schema.appWalletChallenges)
         .set({ consumedAt: now })
         .where(eq(schema.appWalletChallenges.id, challenge.id))
       return { playerId, ...session }
     })
+  }
+}
+
+async function attachWalletToAuthenticatedPlayer(
+  database: WalletAuthDatabaseExecutor,
+  input: {
+    readonly currentPlayerId: string
+    readonly existingWallet: typeof schema.walletIdentities.$inferSelect | undefined
+    readonly address: string
+    readonly publicKey: string
+    readonly now: Date
+  },
+): Promise<string> {
+  const [currentPlayer] = await database
+    .select({ id: schema.players.id })
+    .from(schema.players)
+    .where(eq(schema.players.id, input.currentPlayerId))
+    .for('update')
+  if (!currentPlayer) throw new AppWalletAuthError('Your Rallyo session is no longer valid.')
+
+  const currentWallets = await database
+    .select()
+    .from(schema.walletIdentities)
+    .where(eq(schema.walletIdentities.playerId, input.currentPlayerId))
+    .for('update')
+  const activeCurrentWallets = currentWallets.filter((wallet) => wallet.revokedAt === null)
+  if (currentWallets.some((wallet) => wallet.revokedAt !== null)) {
+    throw new AppWalletAuthError(
+      'This Rallyo Player has a revoked wallet and needs operator-assisted recovery.',
+    )
+  }
+  if (activeCurrentWallets.length > 1) {
+    throw new AppWalletAuthError(
+      'This Rallyo Player has multiple wallet identities and needs operator review.',
+    )
+  }
+
+  if (!input.existingWallet) {
+    if (activeCurrentWallets.length > 0) {
+      throw new AppWalletAuthError('This Rallyo Player already has a different active wallet.')
+    }
+    const [wallet] = await database
+      .insert(schema.walletIdentities)
+      .values({
+        playerId: input.currentPlayerId,
+        address: input.address,
+        publicKey: input.publicKey,
+      })
+      .onConflictDoNothing({ target: schema.walletIdentities.address })
+      .returning({ playerId: schema.walletIdentities.playerId })
+    if (wallet) return wallet.playerId
+
+    const [racedWallet] = await database
+      .select()
+      .from(schema.walletIdentities)
+      .where(eq(schema.walletIdentities.address, input.address))
+      .for('update')
+    if (!racedWallet) throw new AppWalletAuthError('Wallet identity could not be linked.')
+    return attachWalletToAuthenticatedPlayer(database, { ...input, existingWallet: racedWallet })
+  }
+
+  if (input.existingWallet.revokedAt) {
+    throw new AppWalletAuthError('This wallet needs an operator-assisted recovery before sign-in.')
+  }
+  if (input.existingWallet.playerId === input.currentPlayerId) return input.currentPlayerId
+  if (activeCurrentWallets.length > 0) {
+    throw new AppWalletAuthError('This Rallyo Player already has a different active wallet.')
+  }
+
+  const telegramIdentities = await database
+    .select({ id: schema.telegramIdentities.id })
+    .from(schema.telegramIdentities)
+    .where(eq(schema.telegramIdentities.playerId, input.currentPlayerId))
+    .for('update')
+  if (telegramIdentities.length !== 1) {
+    throw new AppWalletAuthError(
+      'This wallet can only be reconciled from a Telegram-connected Rallyo Player.',
+    )
+  }
+
+  try {
+    const merged = await mergeWalletPlayerIntoTelegramPlayer(database, {
+      telegramPlayerId: input.currentPlayerId,
+      walletPlayerId: input.existingWallet.playerId,
+      now: input.now,
+    })
+    return merged.playerId
+  } catch (error) {
+    if (error instanceof IdentityMergeConflictError) throw new AppWalletAuthError(error.message)
+    throw error
   }
 }
 

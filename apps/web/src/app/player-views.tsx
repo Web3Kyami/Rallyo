@@ -31,6 +31,7 @@ import {
   ToneBadge,
 } from '../components/design-system'
 import { prepareNimiqAuthentication } from '../platform/wallet'
+import { RALLYO_TELEGRAM_BOT_URL, RALLYO_TELEGRAM_BOT_USERNAME } from '../platform/telegram'
 import { useAppSession } from './session'
 import {
   avatarOptions,
@@ -126,7 +127,8 @@ export function PlayerEntryPage() {
   const [state, setState] = useState<'idle' | 'requesting' | 'exchanging' | 'error'>('idle')
   const [error, setError] = useState<string | null>(null)
   const [telegramMessage, setTelegramMessage] = useState<string | null>(null)
-  const [botUrl, setBotUrl] = useState<string | null>(null)
+  const [botUrl, setBotUrl] = useState<string>(RALLYO_TELEGRAM_BOT_URL)
+  const [telegramHelpOpen, setTelegramHelpOpen] = useState(false)
 
   if (session.status === 'ready') return <Navigate replace to="/app" />
 
@@ -154,9 +156,9 @@ export function PlayerEntryPage() {
     setError(null)
     try {
       const result = await api.requestTelegramPairing(username.trim())
-      setBotUrl(result.botUrl)
+      setBotUrl(result.botUrl ?? RALLYO_TELEGRAM_BOT_URL)
       setTelegramMessage(
-        'If Rallyo knows this account, a pairing code was sent in Telegram. If no code arrives, start Rallyo Bot first, then try again.',
+        `Open ${RALLYO_TELEGRAM_BOT_USERNAME} to find your pairing code. If there is no message, start Rallyo Bot first, then request a new code.`,
       )
       setTelegramStage('code')
       setState('idle')
@@ -178,7 +180,7 @@ export function PlayerEntryPage() {
     setTelegramStage('code')
     setState('idle')
     setError(null)
-    setTelegramMessage('Enter the one-time code from Rallyo Bot.')
+    setTelegramMessage(`Enter the one-time code from ${RALLYO_TELEGRAM_BOT_USERNAME}.`)
   }
 
   const onWalletAuthenticated = async (redirectPath: string) => {
@@ -235,6 +237,13 @@ export function PlayerEntryPage() {
             <button className="text-button entry-step-link" type="button" onClick={enterCode}>
               I already have a pairing code
             </button>
+            <button
+              className="text-button entry-step-link"
+              type="button"
+              onClick={() => setTelegramHelpOpen(true)}
+            >
+              How do I get a code?
+            </button>
             {state === 'error' ? (
               <p className="entry-form-error" role="alert">
                 {error}
@@ -255,7 +264,7 @@ export function PlayerEntryPage() {
             <SectionLabel>CONNECT TELEGRAM</SectionLabel>
             <h2>Enter your pairing code</h2>
             <p className="entry-step-copy">
-              {telegramMessage ?? 'Enter the one-time code from Rallyo Bot.'}
+              {telegramMessage ?? `Enter the one-time code from ${RALLYO_TELEGRAM_BOT_USERNAME}.`}
             </p>
             <form className="entry-code-form" onSubmit={(event) => void exchange(event)}>
               <label htmlFor="entry-pairing-code">Telegram pairing code</label>
@@ -273,11 +282,16 @@ export function PlayerEntryPage() {
                 Connect Telegram
               </Button>
             </form>
-            {botUrl ? (
-              <a className="button button-outline" href={botUrl} target="_blank" rel="noreferrer">
-                Open Rallyo Bot
-              </a>
-            ) : null}
+            <a className="button button-outline" href={botUrl} target="_blank" rel="noreferrer">
+              Open Rallyo Bot
+            </a>
+            <button
+              className="text-button entry-step-link"
+              type="button"
+              onClick={() => setTelegramHelpOpen(true)}
+            >
+              How do I get a code?
+            </button>
             {state === 'error' ? (
               <p className="entry-form-error" role="alert">
                 {error}
@@ -289,6 +303,9 @@ export function PlayerEntryPage() {
           </div>
         ) : null}
       </div>
+      {telegramHelpOpen ? (
+        <TelegramPairingHelpDialog onClose={() => setTelegramHelpOpen(false)} />
+      ) : null}
     </div>
   )
 }
@@ -555,7 +572,7 @@ export function PlayerHomePage() {
         <StatusBanner
           icon="telegram"
           title="Connect Telegram to restore your communities"
-          detail="Your seasons, tasks, and admin access will appear here."
+          detail="Open Rallyo Bot, send /pair, then enter the one-time code here."
           action={
             <Link className="button button-primary" to="/app/pair">
               Connect Telegram
@@ -599,7 +616,7 @@ export function PlayerHomePage() {
             detail={
               player.username
                 ? 'Join a Rallyo community in Telegram to start building a real score.'
-                : 'Connect Telegram to bring in your Rallyo communities and season history.'
+                : 'Open Rallyo Bot, send /pair, then connect the one-time code to bring in your communities.'
             }
             action={
               <Link
@@ -666,7 +683,7 @@ export function PlayerCommunitiesPage() {
       {result.status === 'ready' && result.data.communities.length === 0 ? (
         <EmptyState
           title="No community record yet"
-          detail="Connect Telegram to restore your communities and season history."
+          detail="Open Rallyo Bot, send /pair, then enter the one-time code to restore your community history."
           action={
             <Link className="button button-primary" to="/app/pair">
               Connect Telegram
@@ -1245,6 +1262,7 @@ export function PlayerPairPage() {
   const [code, setCode] = useState('')
   const [state, setState] = useState<'idle' | 'pairing' | 'error' | 'success'>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [helpOpen, setHelpOpen] = useState(false)
   const walletHandoff = searchParams.get('from') === 'wallet'
   if (session.status !== 'ready') return null
 
@@ -1271,8 +1289,8 @@ export function PlayerPairPage() {
       title="Bring your communities into Rallyo"
       detail={
         walletHandoff
-          ? 'Your wallet session is ready. Finish the link with a code from your Telegram identity.'
-          : 'Use a one-time code from RallyoBot to connect Telegram to this Player.'
+          ? 'Your wallet session is ready. Open Rallyo Bot, send /pair, then enter the code.'
+          : 'Open Rallyo Bot, send /pair, then enter the one-time code to connect Telegram.'
       }
     >
       <BackLink to="/app/me">Back to You</BackLink>
@@ -1283,8 +1301,8 @@ export function PlayerPairPage() {
             <li>
               <span>01</span>
               <div>
-                <strong>Ask RallyoBot</strong>
-                <p>Use /pair in Telegram to request a one-time code.</p>
+                <strong>Open Rallyo Bot</strong>
+                <p>Send /pair to request a one-time code.</p>
               </div>
             </li>
             <li>
@@ -1329,6 +1347,19 @@ export function PlayerPairPage() {
           <p className="field-message">
             Codes expire after a short period and are consumed after a successful link.
           </p>
+          <div className="pair-bot-actions">
+            <a
+              className="button button-outline"
+              href={RALLYO_TELEGRAM_BOT_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open Rallyo Bot
+            </a>
+            <button className="text-button" type="button" onClick={() => setHelpOpen(true)}>
+              Need a code?
+            </button>
+          </div>
           <Button type="submit" icon="link" loading={state === 'pairing'}>
             Connect Telegram
           </Button>
@@ -1345,6 +1376,7 @@ export function PlayerPairPage() {
           ) : null}
         </form>
       </div>
+      {helpOpen ? <TelegramPairingHelpDialog onClose={() => setHelpOpen(false)} /> : null}
     </PageFrame>
   )
 }
@@ -1352,6 +1384,7 @@ export function PlayerPairPage() {
 export function PlayerProfilePage() {
   const session = useAppSession()
   const [copied, setCopied] = useState(false)
+  const [telegramHelpOpen, setTelegramHelpOpen] = useState(false)
   if (session.status !== 'ready') return null
   const { player, wallet, communities, progression } = session.data
   const avatarId = getStoredAvatarId()
@@ -1396,11 +1429,20 @@ export function PlayerProfilePage() {
           tone="accent"
           icon="telegram"
           title="Connect Telegram"
-          detail="Restore communities, season history, tasks, and admin access to this Player."
+          detail="Open Rallyo Bot, send /pair, then enter the one-time code to restore this Player's community history."
           action={
-            <Link className="button button-primary" to="/app/pair">
-              Enter pairing code
-            </Link>
+            <div className="pair-bot-actions">
+              <Link className="button button-primary" to="/app/pair">
+                Enter pairing code
+              </Link>
+              <button
+                className="text-button"
+                type="button"
+                onClick={() => setTelegramHelpOpen(true)}
+              >
+                How to connect
+              </button>
+            </div>
           }
         />
       ) : (
@@ -1475,10 +1517,13 @@ export function PlayerProfilePage() {
         ) : (
           <EmptyState
             title="No community records yet"
-            detail="Connect Telegram or join a community to see your record here."
+            detail="Open Rallyo Bot and send /pair to connect Telegram, or join a community to start a record."
           />
         )}
       </section>
+      {telegramHelpOpen ? (
+        <TelegramPairingHelpDialog onClose={() => setTelegramHelpOpen(false)} />
+      ) : null}
     </PageFrame>
   )
 }
@@ -1583,6 +1628,47 @@ function DailyCheckinDialog({
   )
 }
 
+export function TelegramPairingHelpDialog({ onClose }: { readonly onClose: () => void }) {
+  return (
+    <div className="daily-checkin-backdrop">
+      <section
+        aria-label="How to connect Telegram"
+        aria-modal="true"
+        className="telegram-help-dialog"
+        role="dialog"
+      >
+        <div className="daily-checkin-mark" aria-hidden="true">
+          <Icon name="telegram" size={25} />
+        </div>
+        <div>
+          <SectionLabel>CONNECT TELEGRAM</SectionLabel>
+          <h2>Get a pairing code</h2>
+          <ol>
+            <li>Open Rallyo Bot.</li>
+            <li>Send /pair.</li>
+            <li>Copy the one-time code.</li>
+            <li>Return to Rallyo and paste it here.</li>
+          </ol>
+          <p>{RALLYO_TELEGRAM_BOT_USERNAME}</p>
+        </div>
+        <div className="daily-checkin-actions">
+          <a
+            className="button button-primary"
+            href={RALLYO_TELEGRAM_BOT_URL}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Open Rallyo Bot
+          </a>
+          <button className="text-button" type="button" onClick={onClose}>
+            Back to code entry
+          </button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
 export function PlayerRewardsPage() {
   const session = useAppSession()
   const navigate = useNavigate()
@@ -1592,8 +1678,7 @@ export function PlayerRewardsPage() {
 
   const startWalletLink = async (redirectPath: string) => {
     await session.refresh()
-    void navigate('/app/pair?from=wallet', { replace: true })
-    if (redirectPath !== '/app') void navigate(redirectPath, { replace: true })
+    void navigate(redirectPath === '/app' ? '/app/me' : redirectPath, { replace: true })
   }
 
   return (

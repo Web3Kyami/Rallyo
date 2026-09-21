@@ -235,6 +235,63 @@ describe('server health', () => {
     await pairApp.close()
   })
 
+  it('passes the server-resolved app session into wallet completion', async () => {
+    const completions: unknown[] = []
+    const sessionActor = {
+      sessionId: 'telegram-session-id',
+      playerId: 'telegram-player-id',
+      telegramIdentityId: 'telegram-identity-id',
+      telegramUserId: 7001n,
+      targetCommunityId: null,
+      targetMode: 'player' as const,
+      expiresAt: new Date('2026-10-15T10:00:00.000Z'),
+    }
+    const walletApp = buildServer({
+      appSessionService: {
+        getSession: (token: string | undefined) =>
+          Promise.resolve(token === 'telegram-session' ? sessionActor : null),
+        revokeSession: () => Promise.resolve(),
+      } as never,
+      appWalletAuthService: {
+        completeChallenge: (input: unknown) => {
+          completions.push(input)
+          return Promise.resolve({
+            playerId: 'telegram-player-id',
+            token: 'canonical-session',
+            sessionId: 'canonical-session-id',
+            redirectPath: '/app',
+            expiresAt: new Date('2026-10-15T10:00:00.000Z'),
+          })
+        },
+      } as never,
+    })
+
+    const response = await walletApp.inject({
+      method: 'POST',
+      url: '/api/app/wallet/complete',
+      headers: { cookie: 'rallyo_session=telegram-session' },
+      payload: {
+        challengeId: 'wallet-challenge-1',
+        message: 'sign:NQ00',
+        publicKey: 'public-key',
+        signature: 'signature',
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(completions).toEqual([
+      expect.objectContaining({
+        authenticatedSession: {
+          playerId: 'telegram-player-id',
+          telegramIdentityId: 'telegram-identity-id',
+          targetCommunityId: null,
+          targetMode: 'player',
+        },
+      }),
+    ])
+    await walletApp.close()
+  })
+
   it('keeps app bootstrap behind the server session boundary', async () => {
     const appSessionService = {
       getSession: (token: string | undefined) =>

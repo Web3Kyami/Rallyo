@@ -183,6 +183,292 @@ describeDatabase('Phase 8 identity amendment against PostgreSQL', () => {
     })
   })
 
+  it('attaches a new wallet to the authenticated Telegram Player without creating another Player', async () => {
+    const keyPair = KeyPair.generate()
+    const address = keyPair.toAddress().toUserFriendlyAddress()
+    const current = await appSessions.createSession({
+      playerId: ids.telegramPlayer,
+      telegramIdentityId: ids.telegramIdentity,
+      now,
+    })
+    const actor = await appSessions.getSession(current.token, now)
+    if (!actor) throw new Error('Telegram session fixture was not created.')
+    const challenge = await walletAuth.beginChallenge({ address, now })
+    const signature = keyPair.sign(nimiqSignedMessageHash(challenge.message))
+
+    const completed = await walletAuth.completeChallenge({
+      challengeId: challenge.challengeId,
+      message: challenge.message,
+      publicKey: keyPair.publicKey.toHex(),
+      signature: signature.toHex(),
+      authenticatedSession: actor,
+      now,
+    })
+
+    expect(completed.playerId).toBe(ids.telegramPlayer)
+    expect(await db.select().from(schema.players)).toHaveLength(4)
+    expect(
+      await db
+        .select()
+        .from(schema.walletIdentities)
+        .where(eq(schema.walletIdentities.address, address)),
+    ).toMatchObject([{ playerId: ids.telegramPlayer }])
+    expect(await appSessions.getSession(current.token, now)).toMatchObject({
+      playerId: ids.telegramPlayer,
+      telegramIdentityId: ids.telegramIdentity,
+    })
+    expect(await appSessions.getSession(completed.token, now)).toMatchObject({
+      playerId: ids.telegramPlayer,
+      telegramIdentityId: ids.telegramIdentity,
+    })
+  })
+
+  it('repairs a safe wallet-only duplicate when its owner reconnects from Telegram', async () => {
+    await db.insert(schema.scoreEvents).values({
+      playerId: ids.walletPlayer,
+      communityId: ids.communityOne,
+      seasonId: ids.seasonOne,
+      sourceType: 'QUIZ',
+      sourceId: 'quiz:wallet-duplicate',
+      delta: 9,
+      reason: 'wallet duplicate history',
+      idempotencyKey: 'score:wallet-duplicate',
+    })
+    const duplicateSession = await appSessions.createSession({ playerId: ids.walletPlayer, now })
+    const current = await appSessions.createSession({
+      playerId: ids.telegramPlayer,
+      telegramIdentityId: ids.telegramIdentity,
+      now,
+    })
+    const actor = await appSessions.getSession(current.token, now)
+    if (!actor) throw new Error('Telegram session fixture was not created.')
+    const challenge = await walletAuth.beginChallenge({ address: walletAddress, now })
+    const signature = walletKeyPair.sign(nimiqSignedMessageHash(challenge.message))
+
+    const completed = await walletAuth.completeChallenge({
+      challengeId: challenge.challengeId,
+      message: challenge.message,
+      publicKey: walletKeyPair.publicKey.toHex(),
+      signature: signature.toHex(),
+      authenticatedSession: actor,
+      now,
+    })
+
+    expect(completed.playerId).toBe(ids.telegramPlayer)
+    expect(await db.select().from(schema.players)).toHaveLength(3)
+    expect(
+      await db
+        .select()
+        .from(schema.walletIdentities)
+        .where(eq(schema.walletIdentities.address, walletAddress)),
+    ).toMatchObject([{ playerId: ids.telegramPlayer }])
+    expect(
+      await db
+        .select()
+        .from(schema.scoreEvents)
+        .where(eq(schema.scoreEvents.idempotencyKey, 'score:wallet-duplicate')),
+    ).toMatchObject([{ playerId: ids.telegramPlayer }])
+    expect(await appSessions.getSession(duplicateSession.token, now)).toMatchObject({
+      playerId: ids.telegramPlayer,
+    })
+    expect(await appSessions.getSession(current.token, now)).toMatchObject({
+      playerId: ids.telegramPlayer,
+      telegramIdentityId: ids.telegramIdentity,
+    })
+
+    const walletLogin = await walletAuth.beginChallenge({ address: walletAddress, now })
+    const walletSignature = walletKeyPair.sign(nimiqSignedMessageHash(walletLogin.message))
+    const walletCompleted = await walletAuth.completeChallenge({
+      challengeId: walletLogin.challengeId,
+      message: walletLogin.message,
+      publicKey: walletKeyPair.publicKey.toHex(),
+      signature: walletSignature.toHex(),
+      now,
+    })
+    expect(walletCompleted.playerId).toBe(ids.telegramPlayer)
+  })
+
+  it('keeps reconnecting the same wallet idempotent for the current Telegram Player', async () => {
+    const current = await appSessions.createSession({
+      playerId: ids.telegramPlayer,
+      telegramIdentityId: ids.telegramIdentity,
+      now,
+    })
+    const actor = await appSessions.getSession(current.token, now)
+    if (!actor) throw new Error('Telegram session fixture was not created.')
+    const first = await walletAuth.beginChallenge({ address: walletAddress, now })
+    const firstSignature = walletKeyPair.sign(nimiqSignedMessageHash(first.message))
+    await walletAuth.completeChallenge({
+      challengeId: first.challengeId,
+      message: first.message,
+      publicKey: walletKeyPair.publicKey.toHex(),
+      signature: firstSignature.toHex(),
+      authenticatedSession: actor,
+      now,
+    })
+    const second = await walletAuth.beginChallenge({ address: walletAddress, now })
+    const secondSignature = walletKeyPair.sign(nimiqSignedMessageHash(second.message))
+    const completed = await walletAuth.completeChallenge({
+      challengeId: second.challengeId,
+      message: second.message,
+      publicKey: walletKeyPair.publicKey.toHex(),
+      signature: secondSignature.toHex(),
+      authenticatedSession: actor,
+      now,
+    })
+
+    expect(completed.playerId).toBe(ids.telegramPlayer)
+    expect(await db.select().from(schema.players)).toHaveLength(3)
+    expect(
+      await db
+        .select()
+        .from(schema.walletIdentities)
+        .where(eq(schema.walletIdentities.address, walletAddress)),
+    ).toHaveLength(1)
+  })
+
+  it('does not replace a Telegram Player wallet or merge a conflicting Telegram identity', async () => {
+    const secondWallet = KeyPair.generate()
+    await db.insert(schema.walletIdentities).values({
+      playerId: ids.telegramPlayer,
+      address: secondWallet.toAddress().toUserFriendlyAddress(),
+      publicKey: secondWallet.publicKey.toHex(),
+    })
+    const current = await appSessions.createSession({
+      playerId: ids.telegramPlayer,
+      telegramIdentityId: ids.telegramIdentity,
+      now,
+    })
+    const actor = await appSessions.getSession(current.token, now)
+    if (!actor) throw new Error('Telegram session fixture was not created.')
+    const challenge = await walletAuth.beginChallenge({ address: walletAddress, now })
+    const signature = walletKeyPair.sign(nimiqSignedMessageHash(challenge.message))
+
+    await expect(
+      walletAuth.completeChallenge({
+        challengeId: challenge.challengeId,
+        message: challenge.message,
+        publicKey: walletKeyPair.publicKey.toHex(),
+        signature: signature.toHex(),
+        authenticatedSession: actor,
+        now,
+      }),
+    ).rejects.toThrow('different active wallet')
+    expect(await appSessions.getSession(current.token, now)).toMatchObject({
+      playerId: ids.telegramPlayer,
+    })
+    expect(
+      await db
+        .select()
+        .from(schema.walletIdentities)
+        .where(eq(schema.walletIdentities.address, walletAddress)),
+    ).toMatchObject([{ playerId: ids.walletPlayer }])
+  })
+
+  it('does not auto-merge a wallet Player that already owns another Telegram identity', async () => {
+    await db.insert(schema.telegramIdentities).values({
+      playerId: ids.walletPlayer,
+      telegramUserId: 6003n,
+      displayName: 'Conflicting wallet Telegram',
+      username: 'wallet-conflict',
+    })
+    const current = await appSessions.createSession({
+      playerId: ids.telegramPlayer,
+      telegramIdentityId: ids.telegramIdentity,
+      now,
+    })
+    const actor = await appSessions.getSession(current.token, now)
+    if (!actor) throw new Error('Telegram session fixture was not created.')
+    const challenge = await walletAuth.beginChallenge({ address: walletAddress, now })
+    const signature = walletKeyPair.sign(nimiqSignedMessageHash(challenge.message))
+
+    await expect(
+      walletAuth.completeChallenge({
+        challengeId: challenge.challengeId,
+        message: challenge.message,
+        publicKey: walletKeyPair.publicKey.toHex(),
+        signature: signature.toHex(),
+        authenticatedSession: actor,
+        now,
+      }),
+    ).rejects.toThrow('already has a Telegram identity')
+    expect(await db.select().from(schema.players)).toHaveLength(4)
+    expect(await appSessions.getSession(current.token, now)).toMatchObject({
+      playerId: ids.telegramPlayer,
+    })
+  })
+
+  it('preserves revoked-wallet recovery and consumes no conflicting session state', async () => {
+    await db
+      .update(schema.walletIdentities)
+      .set({ revokedAt: now })
+      .where(eq(schema.walletIdentities.address, walletAddress))
+    const current = await appSessions.createSession({
+      playerId: ids.telegramPlayer,
+      telegramIdentityId: ids.telegramIdentity,
+      now,
+    })
+    const actor = await appSessions.getSession(current.token, now)
+    if (!actor) throw new Error('Telegram session fixture was not created.')
+    const challenge = await walletAuth.beginChallenge({ address: walletAddress, now })
+    const signature = walletKeyPair.sign(nimiqSignedMessageHash(challenge.message))
+
+    await expect(
+      walletAuth.completeChallenge({
+        challengeId: challenge.challengeId,
+        message: challenge.message,
+        publicKey: walletKeyPair.publicKey.toHex(),
+        signature: signature.toHex(),
+        authenticatedSession: actor,
+        now,
+      }),
+    ).rejects.toThrow('operator-assisted recovery')
+    expect(await appSessions.getSession(current.token, now)).toMatchObject({
+      playerId: ids.telegramPlayer,
+    })
+    expect(
+      (await db.select().from(schema.appWalletChallenges)).find(
+        (row) => row.id === challenge.challengeId,
+      )?.consumedAt,
+    ).toBeNull()
+  })
+
+  it('keeps a wallet challenge one-time under concurrent completion retries', async () => {
+    const keyPair = KeyPair.generate()
+    const address = keyPair.toAddress().toUserFriendlyAddress()
+    const current = await appSessions.createSession({
+      playerId: ids.telegramPlayer,
+      telegramIdentityId: ids.telegramIdentity,
+      now,
+    })
+    const actor = await appSessions.getSession(current.token, now)
+    if (!actor) throw new Error('Telegram session fixture was not created.')
+    const challenge = await walletAuth.beginChallenge({ address, now })
+    const signature = keyPair.sign(nimiqSignedMessageHash(challenge.message))
+    const input = {
+      challengeId: challenge.challengeId,
+      message: challenge.message,
+      publicKey: keyPair.publicKey.toHex(),
+      signature: signature.toHex(),
+      authenticatedSession: actor,
+      now,
+    }
+
+    const results = await Promise.allSettled([
+      walletAuth.completeChallenge(input),
+      walletAuth.completeChallenge(input),
+    ])
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1)
+    expect(
+      await db
+        .select()
+        .from(schema.walletIdentities)
+        .where(eq(schema.walletIdentities.address, address)),
+    ).toMatchObject([{ playerId: ids.telegramPlayer }])
+  })
+
   it('reconciles a wallet-origin Player into the existing Telegram Player without duplicate history', async () => {
     await db.insert(schema.socialTasks).values({
       id: ids.task,
