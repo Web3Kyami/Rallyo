@@ -311,11 +311,12 @@ export function buildServer(options: ServerOptions = {}) {
       setWalletCors(reply)
       return reply.code(204).send()
     })
-    app.post<{ Body: { address?: string } }>(
+    app.post<{ Body: { address?: string; format?: string } }>(
       '/api/app/wallet/challenge',
       async (request, reply) => {
         setWalletCors(reply)
         const address = request.body?.address
+        const format = request.body?.format
         request.log.info(
           {
             route: '/api/app/wallet/challenge',
@@ -325,15 +326,37 @@ export function buildServer(options: ServerOptions = {}) {
           },
           'wallet challenge request received',
         )
-        if (typeof address !== 'string' || address.length === 0) {
+        if (format !== 'mini-app' && format !== 'hub') {
+          request.log.warn(
+            { route: '/api/app/wallet/challenge', reason: 'unsupported-format' },
+            'wallet challenge request rejected',
+          )
+          return sendApiError(reply, 400, 'INVALID_REQUEST', 'Unsupported wallet signature format.')
+        }
+        if (format === 'hub' && (typeof address !== 'string' || address.length === 0)) {
           request.log.warn(
             { route: '/api/app/wallet/challenge', reason: 'missing-address' },
             'wallet challenge request rejected',
           )
           return sendApiError(reply, 400, 'INVALID_REQUEST', 'A Nimiq address is required.')
         }
+        if (format === 'mini-app' && address !== undefined) {
+          request.log.warn(
+            { route: '/api/app/wallet/challenge', reason: 'mini-app-address-supplied' },
+            'wallet challenge request rejected',
+          )
+          return sendApiError(
+            reply,
+            400,
+            'INVALID_REQUEST',
+            'Nimiq Pay chooses the signing wallet when you approve the request.',
+          )
+        }
         try {
-          return await appWalletAuthService.beginChallenge({ address })
+          return await appWalletAuthService.beginChallenge({
+            ...(typeof address === 'string' ? { address } : {}),
+            format,
+          })
         } catch (error) {
           if (error instanceof AppWalletAuthError) {
             request.log.warn(

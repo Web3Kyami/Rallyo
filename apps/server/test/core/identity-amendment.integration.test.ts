@@ -164,6 +164,44 @@ describeDatabase('Phase 8 identity amendment against PostgreSQL', () => {
     })
   })
 
+  it('uses the Mini App signing public key as the proven wallet identity', async () => {
+    const signingKey = KeyPair.generate()
+    const signingAddress = signingKey.toAddress().toUserFriendlyAddress()
+    const current = await appSessions.createSession({
+      playerId: ids.telegramPlayer,
+      telegramIdentityId: ids.telegramIdentity,
+      now,
+    })
+    const actor = await appSessions.getSession(current.token, now)
+    if (!actor) throw new Error('Telegram session fixture was not created.')
+    const challenge = await walletAuth.beginChallenge({ format: 'mini-app', now })
+    const signature = signingKey.sign(nimiqSignedMessageHash(challenge.message))
+
+    const completed = await walletAuth.completeChallenge({
+      challengeId: challenge.challengeId,
+      message: challenge.message,
+      publicKey: signingKey.publicKey.toHex(),
+      signature: signature.toHex(),
+      format: 'mini-app',
+      authenticatedSession: actor,
+      now,
+    })
+
+    expect(completed.playerId).toBe(ids.telegramPlayer)
+    expect(
+      await db
+        .select()
+        .from(schema.walletIdentities)
+        .where(eq(schema.walletIdentities.address, signingAddress)),
+    ).toMatchObject([{ playerId: ids.telegramPlayer }])
+    expect(
+      await db
+        .select({ address: schema.appWalletChallenges.address })
+        .from(schema.appWalletChallenges)
+        .where(eq(schema.appWalletChallenges.id, challenge.challengeId)),
+    ).toEqual([{ address: null }])
+  })
+
   it('authenticates an already linked wallet without creating another Player', async () => {
     const challenge = await walletAuth.beginChallenge({ address: walletAddress, now })
     const signature = walletKeyPair.sign(nimiqSignedMessageHash(challenge.message))

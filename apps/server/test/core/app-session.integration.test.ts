@@ -71,6 +71,29 @@ describeDatabase('AppSessionService against PostgreSQL', () => {
     expect(await service.getSession(exchanged.token, new Date(now.getTime() + 3_000))).toBeNull()
   })
 
+  it('restores a valid persistent session and rejects it after expiry or logout', async () => {
+    const issued = await service.createSession({
+      playerId: ids.player,
+      telegramIdentityId: ids.identity,
+      now,
+    })
+
+    expect(
+      await service.getSession(issued.token, new Date(now.getTime() + 29 * 24 * 60 * 60_000)),
+    ).toMatchObject({ playerId: ids.player, telegramIdentityId: ids.identity })
+    expect(
+      await service.getSession(issued.token, new Date(now.getTime() + 30 * 24 * 60 * 60_000)),
+    ).toBeNull()
+
+    const logoutIssued = await service.createSession({
+      playerId: ids.player,
+      telegramIdentityId: ids.identity,
+      now,
+    })
+    await service.revokeSession(logoutIssued.token, new Date(now.getTime() + 1_000))
+    expect(await service.getSession(logoutIssued.token, new Date(now.getTime() + 2_000))).toBeNull()
+  })
+
   it('rejects an expired code and an unverified admin target', async () => {
     const issued = await service.issueCode({ telegramIdentityId: ids.identity, now })
     await expect(

@@ -103,7 +103,9 @@ describe('server health', () => {
     expect(exchangeBody.redirectPath).toBe('/app')
     expect(response.headers['set-cookie']).toContain('rallyo_session=session-for-one-time-code')
     expect(response.headers['set-cookie']).toContain('HttpOnly')
+    expect(response.headers['set-cookie']).toContain('Path=/')
     expect(response.headers['set-cookie']).toContain('SameSite=Lax')
+    expect(response.headers['set-cookie']).toContain('Max-Age=2592000')
     await sessionApp.close()
   })
 
@@ -150,11 +152,39 @@ describe('server health', () => {
     await sessionApp.close()
   })
 
+  it('revokes and clears a persistent app session only on explicit logout', async () => {
+    const revoked: string[] = []
+    const sessionApp = buildServer({
+      appSessionCookieSecure: true,
+      appSessionService: {
+        getSession: () => Promise.resolve(null),
+        revokeSession: (token: string | undefined) => {
+          if (token) revoked.push(token)
+          return Promise.resolve()
+        },
+      } as never,
+    })
+
+    const response = await sessionApp.inject({
+      method: 'POST',
+      url: '/api/app/session/logout',
+      headers: { cookie: 'rallyo_session=persistent-session' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(revoked).toEqual(['persistent-session'])
+    expect(response.headers['set-cookie']).toContain('rallyo_session=')
+    expect(response.headers['set-cookie']).toContain('Max-Age=0')
+    expect(response.headers['set-cookie']).toContain('HttpOnly')
+    expect(response.headers['set-cookie']).toContain('Secure')
+    await sessionApp.close()
+  })
+
   it('exposes wallet-first app authentication and Telegram pairing routes', async () => {
     const walletApp = buildServer({
       walletLinkOrigin: 'https://pay.example',
       appWalletAuthService: {
-        beginChallenge: ({ address }: { readonly address: string }) =>
+        beginChallenge: ({ address }: { readonly address?: string }) =>
           Promise.resolve({
             challengeId: 'wallet-challenge-1',
             message: `sign:${address}`,
@@ -173,7 +203,7 @@ describe('server health', () => {
     const challenge = await walletApp.inject({
       method: 'POST',
       url: '/api/app/wallet/challenge',
-      payload: { address: 'NQ00' },
+      payload: { address: 'NQ00', format: 'hub' },
     })
     const complete = await walletApp.inject({
       method: 'POST',
@@ -190,6 +220,7 @@ describe('server health', () => {
     expect(challenge.headers['access-control-allow-credentials']).toBe('true')
     expect(complete.statusCode).toBe(200)
     expect(complete.headers['set-cookie']).toContain('rallyo_session=wallet-session')
+    expect(complete.headers['set-cookie']).toContain('Max-Age=2592000')
     const missingHubSigner = await walletApp.inject({
       method: 'POST',
       url: '/api/app/wallet/complete',
@@ -233,6 +264,38 @@ describe('server health', () => {
       redirectPath: '/app',
     })
     await pairApp.close()
+  })
+
+  it('creates an unbound Mini App challenge and lets the server derive the signing wallet', async () => {
+    const challengeInputs: unknown[] = []
+    const walletApp = buildServer({
+      appWalletAuthService: {
+        beginChallenge: (input: unknown) => {
+          challengeInputs.push(input)
+          return Promise.resolve({
+            challengeId: 'mini-app-challenge',
+            message: 'Rallyo wallet sign in\nNonce: mini-app',
+            expiresAt: new Date('2026-09-15T10:05:00.000Z'),
+          })
+        },
+      } as never,
+    })
+
+    const challenge = await walletApp.inject({
+      method: 'POST',
+      url: '/api/app/wallet/challenge',
+      payload: { format: 'mini-app' },
+    })
+    const withGuessedAddress = await walletApp.inject({
+      method: 'POST',
+      url: '/api/app/wallet/challenge',
+      payload: { format: 'mini-app', address: 'NQ00' },
+    })
+
+    expect(challenge.statusCode).toBe(200)
+    expect(challengeInputs).toEqual([{ format: 'mini-app' }])
+    expect(withGuessedAddress.statusCode).toBe(400)
+    await walletApp.close()
   })
 
   it('passes the server-resolved app session into wallet completion', async () => {

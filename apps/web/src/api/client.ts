@@ -211,10 +211,10 @@ export const api = {
         body: JSON.stringify({ username }),
       },
     ),
-  walletChallenge: (address: string) =>
+  walletChallenge: (input: { readonly address?: string; readonly format: 'mini-app' | 'hub' }) =>
     request<WalletAuthChallenge>('/api/app/wallet/challenge', {
       method: 'POST',
-      body: JSON.stringify({ address }),
+      body: JSON.stringify(input),
     }),
   walletComplete: (input: WalletAuthCompletion) =>
     request<{ readonly redirectPath: string }>('/api/app/wallet/complete', {

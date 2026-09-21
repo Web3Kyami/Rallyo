@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
-import { ErrorState, PageFrame, ToneBadge } from '../components/primitives'
+import { ErrorState, LoadingState, PageFrame, ToneBadge } from '../components/primitives'
 import { Icon, RallyoBrand } from '../components/design-system'
 import { useAppSession } from './session'
 import { PlayerEntryPage } from './player-views'
@@ -276,6 +276,21 @@ export function OpenSessionPage() {
       })
   }, [code, navigate, session])
 
+  if (!code && session.status === 'loading') {
+    return (
+      <div className="entry-gate public-entry-state">
+        <LoadingState />
+      </div>
+    )
+  }
+  if (!code && session.status === 'ready') return <Navigate replace to="/app" />
+  if (code && state === 'idle') {
+    return (
+      <div className="entry-gate public-entry-state">
+        <LoadingState />
+      </div>
+    )
+  }
   if (state === 'exchanging') {
     return (
       <div className="entry-gate public-entry-state">

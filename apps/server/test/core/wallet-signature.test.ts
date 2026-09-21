@@ -112,6 +112,27 @@ describe('Nimiq wallet signature interoperability', () => {
     ).toBe(true)
   })
 
+  it('accepts an unbound Mini App challenge only when the signing key itself verifies', () => {
+    const keyPair = KeyPair.generate()
+    const signature = keyPair.sign(Buffer.from(UTF8_HUB_DIGEST, 'hex'))
+
+    const diagnostics = inspectNimiqWalletSignature({
+      message: UTF8_MESSAGE,
+      messageHash: sha256(UTF8_MESSAGE),
+      publicKeyHex: keyPair.publicKey.toHex(),
+      signatureHex: signature.toHex(),
+      format: 'mini-app',
+    })
+
+    expect(diagnostics).toMatchObject({
+      normalizedExpectedAddress: null,
+      derivedPublicKeyAddress: keyPair.toAddress().toUserFriendlyAddress(),
+      messageHashMatch: true,
+      cryptographicSignatureValid: true,
+      valid: true,
+    })
+  })
+
   it('rejects the raw-message format that Nimiq Pay does not produce', () => {
     const keyPair = KeyPair.generate()
     const address = keyPair.toAddress().toUserFriendlyAddress()

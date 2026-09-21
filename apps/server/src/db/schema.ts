@@ -308,7 +308,9 @@ export const appWalletChallenges = pgTable(
   'app_wallet_challenges',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    address: text('address').notNull(),
+    // Hub challenges bind to a chosen address. Nimiq Pay signs without an address selector,
+    // so its proven address is derived from the returned public key at completion time.
+    address: text('address'),
     nonceHash: text('nonce_hash').notNull(),
     messageHash: text('message_hash').notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),

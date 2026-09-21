@@ -33,22 +33,38 @@ export class AppWalletAuthError extends Error {
 export class AppWalletAuthService {
   constructor(private readonly database: RallyoDatabase) {}
 
-  async beginChallenge(input: { readonly address: string; readonly now?: Date }) {
+  async beginChallenge(input: {
+    readonly address?: string
+    readonly format?: WalletSignatureFormat
+    readonly now?: Date
+  }) {
     const now = input.now ?? new Date()
-    let address: string
-    try {
-      address = normalizeNimiqAddress(input.address)
-    } catch {
-      throw new AppWalletAuthError('Invalid Nimiq address.')
+    const format = input.format ?? 'hub'
+    if (format !== 'mini-app' && format !== 'hub') {
+      throw new AppWalletAuthError('Unsupported wallet signature format.')
+    }
+    if (format === 'hub' && !input.address) throw new AppWalletAuthError('Invalid Nimiq address.')
+    if (format === 'mini-app' && input.address) {
+      throw new AppWalletAuthError('Nimiq Pay signs with the wallet-selected account.')
+    }
+    let address: string | undefined
+    if (input.address) {
+      try {
+        address = normalizeNimiqAddress(input.address)
+      } catch {
+        throw new AppWalletAuthError('Invalid Nimiq address.')
+      }
     }
 
     const nonce = randomBytes(32).toString('hex')
-    const message = `Rallyo wallet sign in\nAddress: ${address}\nNonce: ${nonce}`
+    const message = address
+      ? `Rallyo wallet sign in\nAddress: ${address}\nNonce: ${nonce}`
+      : `Rallyo wallet sign in\nNonce: ${nonce}`
     const expiresAt = new Date(now.getTime() + APP_WALLET_CHALLENGE_TTL_MS)
     const [challenge] = await this.database
       .insert(schema.appWalletChallenges)
       .values({
-        address,
+        ...(address ? { address } : {}),
         nonceHash: hash(nonce),
         messageHash: hash(message),
         expiresAt,
@@ -88,18 +104,22 @@ export class AppWalletAuthService {
         messageHash: challenge.messageHash,
         publicKeyHex: input.publicKey,
         signatureHex: input.signature,
-        expectedAddress: challenge.address,
+        ...(challenge.address ? { expectedAddress: challenge.address } : {}),
         ...(input.signer === undefined ? {} : { signerAddress: input.signer }),
         ...(input.format ? { format: input.format } : {}),
       })
       if (!verification.valid) {
         throw new AppWalletAuthError('Wallet signature verification failed.', verification)
       }
+      const address = challenge.address ?? verification.derivedPublicKeyAddress
+      if (!address) {
+        throw new AppWalletAuthError('Wallet signature verification failed.', verification)
+      }
 
       const [existingWallet] = await tx
         .select()
         .from(schema.walletIdentities)
-        .where(eq(schema.walletIdentities.address, challenge.address))
+        .where(eq(schema.walletIdentities.address, address))
         .for('update')
 
       let playerId: string
@@ -107,7 +127,7 @@ export class AppWalletAuthService {
         playerId = await attachWalletToAuthenticatedPlayer(tx, {
           currentPlayerId: input.authenticatedSession.playerId,
           existingWallet,
-          address: challenge.address,
+          address,
           publicKey: input.publicKey,
           now,
         })
@@ -128,7 +148,7 @@ export class AppWalletAuthService {
           .insert(schema.walletIdentities)
           .values({
             playerId: newPlayer.id,
-            address: challenge.address,
+            address,
             publicKey: input.publicKey,
           })
           .onConflictDoNothing({ target: schema.walletIdentities.address })
@@ -139,7 +159,7 @@ export class AppWalletAuthService {
           const [racedWallet] = await tx
             .select()
             .from(schema.walletIdentities)
-            .where(eq(schema.walletIdentities.address, challenge.address))
+            .where(eq(schema.walletIdentities.address, address))
             .for('update')
           await tx.delete(schema.players).where(eq(schema.players.id, newPlayer.id))
           if (!racedWallet || racedWallet.revokedAt) {

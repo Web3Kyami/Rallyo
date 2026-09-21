@@ -1,0 +1,1 @@
+ALTER TABLE "app_wallet_challenges" ALTER COLUMN "address" DROP NOT NULL;

@@ -201,13 +201,15 @@ export function inspectNimiqWalletSignature(input: {
   readonly publicKeyHex: string
   readonly signatureHex: string
   readonly signerAddress?: string
-  readonly expectedAddress: string
+  readonly expectedAddress?: string
   readonly format?: WalletSignatureFormat
 }): WalletSignatureDiagnostics {
   const signatureFormat = input.format ?? 'mini-app'
   const publicKeyByteLength = hexByteLength(input.publicKeyHex)
   const signatureByteLength = hexByteLength(input.signatureHex)
-  const normalizedExpectedAddress = safeNormalizeAddress(input.expectedAddress)
+  const normalizedExpectedAddress = input.expectedAddress
+    ? safeNormalizeAddress(input.expectedAddress)
+    : null
   const submittedHubSignerAddress = input.signerAddress
     ? safeNormalizeAddress(input.signerAddress)
     : null
@@ -224,9 +226,12 @@ export function inspectNimiqWalletSignature(input: {
     cryptographicSignatureValid = publicKey.verify(signature, signedData)
   }
   const addressMatch =
-    normalizedExpectedAddress !== null &&
-    derivedPublicKeyAddress === normalizedExpectedAddress &&
-    (signatureFormat !== 'hub' || submittedHubSignerAddress === normalizedExpectedAddress)
+    derivedPublicKeyAddress !== null &&
+    (signatureFormat === 'mini-app'
+      ? normalizedExpectedAddress === null || derivedPublicKeyAddress === normalizedExpectedAddress
+      : normalizedExpectedAddress !== null &&
+        derivedPublicKeyAddress === normalizedExpectedAddress &&
+        submittedHubSignerAddress === normalizedExpectedAddress)
 
   return {
     signatureFormat,

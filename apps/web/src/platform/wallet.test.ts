@@ -61,7 +61,10 @@ describe('browser Nimiq authentication', () => {
       appName: 'Rallyo',
       disableContracts: true,
     })
-    expect(mocks.walletChallenge).toHaveBeenCalledWith('NQ12 TEST ADDRESS')
+    expect(mocks.walletChallenge).toHaveBeenCalledWith({
+      address: 'NQ12 TEST ADDRESS',
+      format: 'hub',
+    })
     expect(mocks.signMessage).not.toHaveBeenCalled()
 
     await prepared.confirm()
@@ -110,21 +113,23 @@ describe('browser Nimiq authentication', () => {
     expect(mocks.walletComplete).not.toHaveBeenCalled()
   })
 
-  it('keeps the Mini App SDK signature flow unchanged', async () => {
+  it('uses the signing key rather than an exposed account position in Nimiq Pay', async () => {
     mocks.detectEnvironment.mockReturnValue({ host: 'nimiq-pay' })
-    const connect = vi.fn().mockResolvedValue(undefined)
-    const listAccounts = vi.fn().mockResolvedValue(['NQ12 MINI APP ADDRESS'])
+    const listAccounts = vi
+      .fn()
+      .mockResolvedValue(['NQ12 FIRST EXPOSED ACCOUNT', 'NQ34 SIGNING ACCOUNT'])
     const sign = vi.fn().mockResolvedValue({
       publicKey: 'abcd',
       signature: '0102',
     })
-    mocks.init.mockResolvedValue({ connect, listAccounts, sign })
+    mocks.init.mockResolvedValue({ listAccounts, sign })
 
     const prepared = await prepareNimiqAuthentication()
-    expect(prepared.requiresConfirmation).toBe(false)
+    expect(prepared.requiresConfirmation).toBe(true)
+    expect(mocks.walletChallenge).toHaveBeenCalledWith({ format: 'mini-app' })
+    expect(sign).not.toHaveBeenCalled()
     await prepared.confirm()
 
-    expect(connect).toHaveBeenCalledOnce()
     expect(listAccounts).toHaveBeenCalledOnce()
     expect(sign).toHaveBeenCalledWith('Rallyo wallet sign in\nNonce: test')
     expect(mocks.chooseAddress).not.toHaveBeenCalled()
@@ -135,5 +140,49 @@ describe('browser Nimiq authentication', () => {
       signature: '0102',
       format: 'mini-app',
     })
+  })
+
+  it('handles a cancelled Nimiq Pay account request response', async () => {
+    mocks.detectEnvironment.mockReturnValue({ host: 'nimiq-pay' })
+    mocks.init.mockResolvedValue({
+      listAccounts: vi.fn().mockResolvedValue({
+        error: { type: 'PERMISSION_DENIED', message: 'User cancelled' },
+      }),
+    })
+
+    await expect(prepareNimiqAuthentication()).rejects.toThrow('Nimiq Pay request was cancelled.')
+    expect(mocks.walletChallenge).not.toHaveBeenCalled()
+  })
+
+  it('reports when Nimiq Pay shares no account', async () => {
+    mocks.detectEnvironment.mockReturnValue({ host: 'nimiq-pay' })
+    mocks.init.mockResolvedValue({ listAccounts: vi.fn().mockResolvedValue([]) })
+
+    await expect(prepareNimiqAuthentication()).rejects.toThrow(
+      'Nimiq Pay did not share an account.',
+    )
+    expect(mocks.walletChallenge).not.toHaveBeenCalled()
+  })
+
+  it('handles a cancelled Nimiq Pay signing response without completing authentication', async () => {
+    mocks.detectEnvironment.mockReturnValue({ host: 'nimiq-pay' })
+    const sign = vi.fn().mockResolvedValue({
+      error: { type: 'PERMISSION_DENIED', message: 'User cancelled' },
+    })
+    mocks.init.mockResolvedValue({
+      listAccounts: vi.fn().mockResolvedValue(['NQ12 MINI APP ADDRESS']),
+      sign,
+    })
+
+    const prepared = await prepareNimiqAuthentication()
+    await expect(prepared.confirm()).rejects.toThrow('Nimiq Pay request was cancelled.')
+    expect(mocks.walletComplete).not.toHaveBeenCalled()
+  })
+
+  it('reports an unavailable Nimiq Pay provider', async () => {
+    mocks.detectEnvironment.mockReturnValue({ host: 'nimiq-pay' })
+    mocks.init.mockRejectedValue(new Error('provider timeout'))
+
+    await expect(prepareNimiqAuthentication()).rejects.toThrow('Nimiq Pay is unavailable.')
   })
 })
