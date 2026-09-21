@@ -334,16 +334,11 @@ export class AppSessionService {
         sessionId: schema.appSessions.id,
         playerId: schema.appSessions.playerId,
         telegramIdentityId: schema.appSessions.telegramIdentityId,
-        telegramUserId: schema.telegramIdentities.telegramUserId,
         targetCommunityId: schema.appSessions.targetCommunityId,
         targetMode: schema.appSessions.targetMode,
         expiresAt: schema.appSessions.expiresAt,
       })
       .from(schema.appSessions)
-      .leftJoin(
-        schema.telegramIdentities,
-        eq(schema.telegramIdentities.id, schema.appSessions.telegramIdentityId),
-      )
       .where(
         and(
           eq(schema.appSessions.tokenHash, hash(token)),
@@ -355,13 +350,26 @@ export class AppSessionService {
 
     if (!row) return null
 
+    const identity = await resolveSessionTelegramIdentity(this.database, {
+      playerId: row.playerId,
+      telegramIdentityId: row.telegramIdentityId,
+    })
+
     await this.database
       .update(schema.appSessions)
-      .set({ lastSeenAt: now })
+      .set({
+        lastSeenAt: now,
+        ...(row.telegramIdentityId === null && identity ? { telegramIdentityId: identity.id } : {}),
+      })
       .where(eq(schema.appSessions.id, row.sessionId))
 
     const targetMode: AppSessionTargetMode = row.targetMode === 'admin' ? 'admin' : 'player'
-    return { ...row, targetMode, telegramUserId: row.telegramUserId ?? null }
+    return {
+      ...row,
+      telegramIdentityId: identity?.id ?? null,
+      telegramUserId: identity?.telegramUserId ?? null,
+      targetMode,
+    }
   }
 
   async revokeSession(token: string | undefined, now = new Date()): Promise<void> {
@@ -432,6 +440,7 @@ export async function createAppSession(
   },
 ): Promise<AppSessionIssued> {
   const now = input.now ?? new Date()
+  const identity = await resolveSessionTelegramIdentity(database, input)
   const token = randomToken()
   const expiresAt = new Date(now.getTime() + APP_SESSION_TTL_MS)
   const targetMode = input.targetMode ?? 'player'
@@ -439,7 +448,7 @@ export async function createAppSession(
     .insert(schema.appSessions)
     .values({
       playerId: input.playerId,
-      ...(input.telegramIdentityId ? { telegramIdentityId: input.telegramIdentityId } : {}),
+      ...(identity ? { telegramIdentityId: identity.id } : {}),
       ...(input.targetCommunityId ? { targetCommunityId: input.targetCommunityId } : {}),
       targetMode,
       tokenHash: hash(token),
@@ -457,6 +466,45 @@ export async function createAppSession(
         ? `/app/admin/${input.targetCommunityId}`
         : '/app',
   }
+}
+
+async function resolveSessionTelegramIdentity(
+  database: AppSessionDatabaseExecutor,
+  input: { readonly playerId: string; readonly telegramIdentityId?: string | null },
+): Promise<{ readonly id: string; readonly telegramUserId: bigint } | null> {
+  if (input.telegramIdentityId) {
+    const [identity] = await database
+      .select({
+        id: schema.telegramIdentities.id,
+        telegramUserId: schema.telegramIdentities.telegramUserId,
+      })
+      .from(schema.telegramIdentities)
+      .where(
+        and(
+          eq(schema.telegramIdentities.id, input.telegramIdentityId),
+          eq(schema.telegramIdentities.playerId, input.playerId),
+        ),
+      )
+      .limit(1)
+    if (!identity) {
+      throw new AppSessionError('The Telegram identity no longer belongs to this Rallyo Player.')
+    }
+    return identity
+  }
+
+  const identities = await database
+    .select({
+      id: schema.telegramIdentities.id,
+      telegramUserId: schema.telegramIdentities.telegramUserId,
+    })
+    .from(schema.telegramIdentities)
+    .where(eq(schema.telegramIdentities.playerId, input.playerId))
+    .limit(2)
+
+  // A Player normally has zero or one Telegram identity. Never choose between an
+  // invalid multi-identity state: it requires operator recovery rather than a
+  // session silently impersonating one of the identities.
+  return identities.length === 1 ? (identities[0] ?? null) : null
 }
 
 function randomToken(): string {

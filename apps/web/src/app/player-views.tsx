@@ -41,11 +41,11 @@ import {
   formatDateTime,
   formatDeadline,
   getLeagueAvatarId,
-  hasStoredAvatarId,
   getStoredAvatarId,
   shortAddress,
   storeAvatarId,
   taskState,
+  walletAuthenticationRedirectPath,
   type PlayerTaskFilter,
 } from './player-data'
 
@@ -185,10 +185,7 @@ export function PlayerEntryPage() {
 
   const onWalletAuthenticated = async (redirectPath: string) => {
     await session.refresh()
-    void navigate(
-      redirectPath === '/app' && !hasStoredAvatarId() ? '/app/onboarding/avatar' : redirectPath,
-      { replace: true },
-    )
+    void navigate(walletAuthenticationRedirectPath(redirectPath), { replace: true })
   }
 
   return (

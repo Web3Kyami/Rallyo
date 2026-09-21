@@ -272,6 +272,15 @@ describeDatabase('Phase 8 identity amendment against PostgreSQL', () => {
       reason: 'wallet duplicate history',
       idempotencyKey: 'score:wallet-duplicate',
     })
+    await db.insert(schema.rallyoXpEvents).values({
+      playerId: ids.walletPlayer,
+      amountXp: 25,
+      eventType: 'DAILY_CHECKIN',
+      reason: 'Wallet duplicate XP',
+      occurredAt: now,
+      idempotencyKey: 'xp:wallet-duplicate',
+      claimDate: '2026-09-15',
+    })
     const duplicateSession = await appSessions.createSession({ playerId: ids.walletPlayer, now })
     const current = await appSessions.createSession({
       playerId: ids.telegramPlayer,
@@ -324,6 +333,26 @@ describeDatabase('Phase 8 identity amendment against PostgreSQL', () => {
       now,
     })
     expect(walletCompleted.playerId).toBe(ids.telegramPlayer)
+    const walletActor = await appSessions.getSession(walletCompleted.token, now)
+    expect(walletActor).toMatchObject({
+      playerId: ids.telegramPlayer,
+      telegramIdentityId: ids.telegramIdentity,
+      telegramUserId: 6001n,
+    })
+
+    const [telegramBootstrap, walletBootstrap] = await Promise.all([
+      appApi.bootstrap(actor, now),
+      appApi.bootstrap(walletActor!, now),
+    ])
+    expect(walletBootstrap.player).toEqual(telegramBootstrap.player)
+    expect(walletBootstrap.wallet).toEqual({ linked: true, address: walletAddress })
+    expect(walletBootstrap.progression).toEqual(telegramBootstrap.progression)
+    expect(walletBootstrap.progression.totalXp).toBe(25)
+    expect(walletBootstrap.communities).toEqual(telegramBootstrap.communities)
+    expect(walletBootstrap.adminCommunities).toEqual(telegramBootstrap.adminCommunities)
+    expect(walletBootstrap.adminCommunities).toEqual([
+      { id: ids.communityTwo, title: 'Admin community', telegramChatId: '6102' },
+    ])
   })
 
   it('keeps reconnecting the same wallet idempotent for the current Telegram Player', async () => {

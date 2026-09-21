@@ -96,6 +96,7 @@ export async function mergeWalletPlayerIntoTelegramPlayer(
   await reassignManualAwards(database, input)
   await reassignRewardEntitlements(database, input)
   await reassignActivityRollups(database, input)
+  await reassignRallyoXpEvents(database, input)
 
   if (walletOriginWallets[0] && !canonicalWallets[0]) {
     await database
@@ -357,6 +358,43 @@ async function reassignScoreEvents(
         .set({ playerId: input.telegramPlayerId })
         .where(eq(schema.scoreEvents.id, row.id))
     }
+  }
+}
+
+async function reassignRallyoXpEvents(
+  database: DatabaseExecutor,
+  input: { readonly telegramPlayerId: string; readonly walletPlayerId: string },
+) {
+  const rows = await database
+    .select()
+    .from(schema.rallyoXpEvents)
+    .where(eq(schema.rallyoXpEvents.playerId, input.walletPlayerId))
+    .for('update')
+
+  for (const row of rows) {
+    if (row.claimDate) {
+      const [collision] = await database
+        .select({ id: schema.rallyoXpEvents.id })
+        .from(schema.rallyoXpEvents)
+        .where(
+          and(
+            eq(schema.rallyoXpEvents.playerId, input.telegramPlayerId),
+            eq(schema.rallyoXpEvents.eventType, row.eventType),
+            eq(schema.rallyoXpEvents.claimDate, row.claimDate),
+          ),
+        )
+        .for('update')
+      if (collision) {
+        throw new IdentityMergeConflictError(
+          'The Players have conflicting Rallyo XP history and need operator review.',
+        )
+      }
+    }
+
+    await database
+      .update(schema.rallyoXpEvents)
+      .set({ playerId: input.telegramPlayerId })
+      .where(eq(schema.rallyoXpEvents.id, row.id))
   }
 }
 

@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import type { AppTask } from '../api/client'
-import { filterPlayerTasks, formatDeadline, shortAddress, taskState } from './player-data'
+import {
+  filterPlayerTasks,
+  formatDeadline,
+  shortAddress,
+  taskState,
+  walletAuthenticationRedirectPath,
+} from './player-data'
 
 const baseTask: AppTask = {
   id: 'task-1',
@@ -59,5 +65,9 @@ describe('player data helpers', () => {
       'Ends in under 2 hours',
     )
     expect(shortAddress('NQ42 1234 5678 9012 3456 7890 1234 5678')).toBe('NQ42 1234…34 5678')
+  })
+
+  it('uses the authenticated server path without treating local avatar state as onboarding', () => {
+    expect(walletAuthenticationRedirectPath('/app')).toBe('/app')
   })
 })

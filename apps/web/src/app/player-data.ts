@@ -28,6 +28,12 @@ export function hasStoredAvatarId(): boolean {
   }
 }
 
+// A locally stored avatar is a presentation preference, not proof that the
+// canonical Player is new. Authentication always follows the server path.
+export function walletAuthenticationRedirectPath(redirectPath: string): string {
+  return redirectPath
+}
+
 export function getStoredAvatarId(): string {
   try {
     return window.localStorage.getItem(AVATAR_STORAGE_KEY) ?? 'neutral-01'

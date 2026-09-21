@@ -94,6 +94,37 @@ describeDatabase('AppSessionService against PostgreSQL', () => {
     expect(await service.getSession(logoutIssued.token, new Date(now.getTime() + 2_000))).toBeNull()
   })
 
+  it('resolves a canonical Telegram identity for a wallet-created session', async () => {
+    const issued = await service.createSession({ playerId: ids.player, now })
+
+    expect(await service.getSession(issued.token, now)).toMatchObject({
+      playerId: ids.player,
+      telegramIdentityId: ids.identity,
+      telegramUserId: 987654n,
+    })
+    expect(
+      await db
+        .select({ telegramIdentityId: schema.appSessions.telegramIdentityId })
+        .from(schema.appSessions)
+        .where(eq(schema.appSessions.id, issued.sessionId)),
+    ).toEqual([{ telegramIdentityId: ids.identity }])
+  })
+
+  it('does not choose a Telegram identity when a Player has an invalid multiple-identity state', async () => {
+    await db.insert(schema.telegramIdentities).values({
+      playerId: ids.player,
+      telegramUserId: 987655n,
+      displayName: 'Conflicting session tester',
+    })
+    const issued = await service.createSession({ playerId: ids.player, now })
+
+    expect(await service.getSession(issued.token, now)).toMatchObject({
+      playerId: ids.player,
+      telegramIdentityId: null,
+      telegramUserId: null,
+    })
+  })
+
   it('rejects an expired code and an unverified admin target', async () => {
     const issued = await service.issueCode({ telegramIdentityId: ids.identity, now })
     await expect(
