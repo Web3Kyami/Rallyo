@@ -423,7 +423,7 @@ export function buildServer(options: ServerOptions = {}) {
         }
       } catch (error) {
         if (error instanceof AppWalletAuthError) {
-          if (error.walletVerification?.signatureFormat === 'hub') {
+          if (error.walletVerification) {
             request.log.warn(
               {
                 signatureFormat: error.walletVerification.signatureFormat,
@@ -435,7 +435,7 @@ export function buildServer(options: ServerOptions = {}) {
                 messageHashMatch: error.walletVerification.messageHashMatch,
                 cryptographicSignatureValid: error.walletVerification.cryptographicSignatureValid,
               },
-              'Hub wallet signature verification failed',
+              'Nimiq wallet signature verification failed',
             )
           } else {
             request.log.warn(

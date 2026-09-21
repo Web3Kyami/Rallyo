@@ -1,9 +1,9 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { KeyPair, BufferUtils } from '@nimiq/core'
+import { KeyPair } from '@nimiq/core'
 import { sql } from 'drizzle-orm'
 
 import {
-  nimiqHubSignedMessageHash,
+  nimiqSignedMessageHash,
   WalletLinkError,
   WalletLinkService,
 } from '../../src/core/wallet-link-service'
@@ -39,7 +39,7 @@ describeDatabase('WalletLinkService against PostgreSQL', () => {
     const address = keyPair.toAddress().toUserFriendlyAddress()
     const issued = await service.issueCode({ telegramIdentityId: identityId, now })
     const challenge = await service.beginChallenge({ code: issued.code, address, now })
-    const signature = keyPair.sign(BufferUtils.fromUtf8(challenge.message))
+    const signature = keyPair.sign(nimiqSignedMessageHash(challenge.message))
 
     const linked = await service.completeChallenge({
       challengeId: challenge.challengeId,
@@ -71,7 +71,7 @@ describeDatabase('WalletLinkService against PostgreSQL', () => {
       address: signer.toAddress().toUserFriendlyAddress(),
       now,
     })
-    const wrongSignature = wrongSigner.sign(BufferUtils.fromUtf8(challenge.message))
+    const wrongSignature = wrongSigner.sign(nimiqSignedMessageHash(challenge.message))
     await expect(
       service.completeChallenge({
         challengeId: challenge.challengeId,
@@ -89,7 +89,7 @@ describeDatabase('WalletLinkService against PostgreSQL', () => {
     const address = keyPair.toAddress().toUserFriendlyAddress()
     const issued = await service.issueCode({ telegramIdentityId: identityId, now })
     const challenge = await service.beginChallenge({ code: issued.code, address, now })
-    const hubSignature = keyPair.sign(nimiqHubSignedMessageHash(challenge.message))
+    const hubSignature = keyPair.sign(nimiqSignedMessageHash(challenge.message))
 
     const linked = await service.completeChallenge({
       challengeId: challenge.challengeId,
@@ -104,7 +104,7 @@ describeDatabase('WalletLinkService against PostgreSQL', () => {
 
     const secondIssued = await service.issueCode({ telegramIdentityId: identityId, now })
     const secondChallenge = await service.beginChallenge({ code: secondIssued.code, address, now })
-    const rawSignature = keyPair.sign(BufferUtils.fromUtf8(secondChallenge.message))
+    const rawSignature = keyPair.sign(Buffer.from(secondChallenge.message, 'utf8'))
     await expect(
       service.completeChallenge({
         challengeId: secondChallenge.challengeId,

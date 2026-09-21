@@ -1,12 +1,12 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { BufferUtils, KeyPair } from '@nimiq/core'
+import { KeyPair } from '@nimiq/core'
 import { eq, sql } from 'drizzle-orm'
 
 import { AppApiForbiddenError, AppApiService } from '../../src/core/app-api-service'
 import { AppWalletAuthService } from '../../src/core/app-wallet-auth-service'
 import { AppSessionError, AppSessionService } from '../../src/core/app-session-service'
 import {
-  nimiqHubSignedMessageHash,
+  nimiqSignedMessageHash,
   WalletLinkError,
   WalletLinkService,
 } from '../../src/core/wallet-link-service'
@@ -109,7 +109,7 @@ describeDatabase('Phase 8 identity amendment against PostgreSQL', () => {
     const keyPair = KeyPair.generate()
     const address = keyPair.toAddress().toUserFriendlyAddress()
     const challenge = await walletAuth.beginChallenge({ address, now })
-    const signature = keyPair.sign(BufferUtils.fromUtf8(challenge.message))
+    const signature = keyPair.sign(nimiqSignedMessageHash(challenge.message))
 
     const completed = await walletAuth.completeChallenge({
       challengeId: challenge.challengeId,
@@ -145,7 +145,7 @@ describeDatabase('Phase 8 identity amendment against PostgreSQL', () => {
     const keyPair = KeyPair.generate()
     const address = keyPair.toAddress().toUserFriendlyAddress()
     const challenge = await walletAuth.beginChallenge({ address, now })
-    const signature = keyPair.sign(nimiqHubSignedMessageHash(challenge.message))
+    const signature = keyPair.sign(nimiqSignedMessageHash(challenge.message))
 
     const completed = await walletAuth.completeChallenge({
       challengeId: challenge.challengeId,
@@ -166,7 +166,7 @@ describeDatabase('Phase 8 identity amendment against PostgreSQL', () => {
 
   it('authenticates an already linked wallet without creating another Player', async () => {
     const challenge = await walletAuth.beginChallenge({ address: walletAddress, now })
-    const signature = walletKeyPair.sign(BufferUtils.fromUtf8(challenge.message))
+    const signature = walletKeyPair.sign(nimiqSignedMessageHash(challenge.message))
     const completed = await walletAuth.completeChallenge({
       challengeId: challenge.challengeId,
       message: challenge.message,
@@ -360,7 +360,7 @@ describeDatabase('Phase 8 identity amendment against PostgreSQL', () => {
       address: walletAddress,
       now,
     })
-    const signature = walletKeyPair.sign(BufferUtils.fromUtf8(challenge.message))
+    const signature = walletKeyPair.sign(nimiqSignedMessageHash(challenge.message))
     await expect(
       walletLinks.completeChallenge({
         challengeId: challenge.challengeId,

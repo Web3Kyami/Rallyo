@@ -188,7 +188,7 @@ export function verifyNimiqWalletSignature(input: {
 
 export type WalletSignatureFormat = 'mini-app' | 'hub'
 
-export function nimiqHubSignedMessageHash(message: string): Uint8Array {
+export function nimiqSignedMessageHash(message: string): Uint8Array {
   const messageBytes = BufferUtils.fromUtf8(message)
   const prefixBytes = BufferUtils.fromUtf8('\u0016Nimiq Signed Message:\n')
   const lengthBytes = BufferUtils.fromUtf8(String(messageBytes.length))
@@ -220,10 +220,7 @@ export function inspectNimiqWalletSignature(input: {
   const messageHashMatch = hash(input.message) === input.messageHash
   let cryptographicSignatureValid = false
   if (publicKey && signature) {
-    const signedData =
-      signatureFormat === 'hub'
-        ? nimiqHubSignedMessageHash(input.message)
-        : BufferUtils.fromUtf8(input.message)
+    const signedData = nimiqSignedMessageHash(input.message)
     cryptographicSignatureValid = publicKey.verify(signature, signedData)
   }
   const addressMatch =
