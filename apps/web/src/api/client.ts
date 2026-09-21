@@ -370,6 +370,14 @@ export type AppCommunityDetail = {
     readonly points: number
     readonly rank: number | null
   }
+  readonly telegram:
+    | {
+        readonly linked: true
+        readonly identityId: string
+        readonly username: string | null
+        readonly displayName: string
+      }
+    | { readonly linked: false }
   readonly leaderboard: readonly AppLeaderboardEntry[]
   readonly games: readonly AppGameCapability[]
   readonly tasks: readonly AppTask[]

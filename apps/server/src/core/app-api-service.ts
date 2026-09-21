@@ -67,6 +67,7 @@ export class AppApiService {
     const [identity] = actor.telegramIdentityId
       ? await this.database
           .select({
+            id: schema.telegramIdentities.id,
             displayName: schema.telegramIdentities.displayName,
             username: schema.telegramIdentities.username,
           })
@@ -97,6 +98,14 @@ export class AppApiService {
         displayName: identity?.displayName ?? 'Rallyo player',
         username: identity?.username ?? null,
       },
+      telegram: identity
+        ? {
+            linked: true as const,
+            identityId: identity.id,
+            username: identity.username,
+            displayName: identity.displayName,
+          }
+        : { linked: false as const },
       progression: await this.progression(actor, now),
       wallet: wallet ? { linked: true, address: wallet.address } : { linked: false },
       communities: await this.listCommunities(actor, now),

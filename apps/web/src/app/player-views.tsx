@@ -1262,6 +1262,22 @@ export function PlayerPairPage() {
   const [helpOpen, setHelpOpen] = useState(false)
   const walletHandoff = searchParams.get('from') === 'wallet'
   if (session.status !== 'ready') return null
+  const telegram = session.data.telegram
+
+  if (telegram.linked) {
+    return (
+      <PageFrame
+        eyebrow="TELEGRAM"
+        title="Connected"
+        detail="Your Telegram identity is connected to this Rallyo Player."
+      >
+        {telegram.username ? <p className="page-note">@{telegram.username}</p> : null}
+        <Link className="button button-primary" to="/app/me">
+          Back to You
+        </Link>
+      </PageFrame>
+    )
+  }
 
   const pair = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -1299,24 +1315,20 @@ export function PlayerPairPage() {
               <span>01</span>
               <div>
                 <strong>Open Rallyo Bot</strong>
-                <p>Send /pair to request a one-time code.</p>
+                <p className="telegram-bot-url">{RALLYO_TELEGRAM_BOT_URL}</p>
+                <TelegramBotAccess compact />
               </div>
             </li>
             <li>
               <span>02</span>
               <div>
-                <strong>Paste the code</strong>
-                <p>The code is short-lived and can be used once.</p>
+                <strong>Send /pair and copy the one-time code</strong>
               </div>
             </li>
             <li>
               <span>03</span>
               <div>
-                <strong>Keep your record</strong>
-                <p>
-                  Communities, season history, tasks, and admin access stay with the canonical
-                  Player.
-                </p>
+                <strong>Return to Rallyo and paste the code below</strong>
               </div>
             </li>
           </ol>
@@ -1344,12 +1356,6 @@ export function PlayerPairPage() {
           <p className="field-message">
             Codes expire after a short period and are consumed after a successful link.
           </p>
-          <div className="pair-bot-actions">
-            <TelegramBotAccess />
-            <button className="text-button" type="button" onClick={() => setHelpOpen(true)}>
-              Need a code?
-            </button>
-          </div>
           <Button type="submit" icon="link" loading={state === 'pairing'}>
             Connect Telegram
           </Button>
@@ -1375,8 +1381,9 @@ export function PlayerProfilePage() {
   const session = useAppSession()
   const [copied, setCopied] = useState(false)
   const [telegramHelpOpen, setTelegramHelpOpen] = useState(false)
+  const navigate = useNavigate()
   if (session.status !== 'ready') return null
-  const { player, wallet, communities, progression } = session.data
+  const { player, telegram, wallet, communities, progression } = session.data
   const avatarId = getStoredAvatarId()
   const copyAddress = async () => {
     if (!wallet.linked) return
@@ -1405,7 +1412,13 @@ export function PlayerProfilePage() {
         <div>
           <SectionLabel>CANONICAL PLAYER</SectionLabel>
           <h2>{player.displayName}</h2>
-          <p>{player.username ? `Telegram @${player.username}` : 'Telegram not connected'}</p>
+          <p>
+            {telegram.linked
+              ? telegram.username
+                ? `Telegram @${telegram.username}`
+                : 'Telegram connected'
+              : 'Telegram not connected'}
+          </p>
         </div>
         <Link className="button button-outline" to="/app/onboarding/avatar">
           Change avatar
@@ -1414,7 +1427,7 @@ export function PlayerProfilePage() {
 
       <RallyoProgressionSummary progression={progression} showCheckinState />
 
-      {!player.username ? (
+      {!telegram.linked ? (
         <StatusBanner
           tone="accent"
           icon="telegram"
@@ -1443,7 +1456,7 @@ export function PlayerProfilePage() {
           <div>
             <SectionLabel>TELEGRAM</SectionLabel>
             <h2>Connected</h2>
-            <p>{player.username ? `@${player.username}` : 'Connected identity'}</p>
+            <p>{telegram.username ? `@${telegram.username}` : telegram.displayName}</p>
           </div>
           <ToneBadge tone="success">Active</ToneBadge>
         </section>
@@ -1467,9 +1480,14 @@ export function PlayerProfilePage() {
             {copied ? 'Copied' : 'Copy address'}
           </Button>
         ) : (
-          <Link className="button button-outline" to="/app/rewards">
-            Connect Nimiq
-          </Link>
+          <WalletSignInButton
+            enabled
+            variant="secondary"
+            onAuthenticated={async () => {
+              await session.refresh()
+              void navigate('/app/me', { replace: true })
+            }}
+          />
         )}
       </section>
 
@@ -1651,7 +1669,7 @@ export function TelegramPairingHelpDialog({ onClose }: { readonly onClose: () =>
   )
 }
 
-export function TelegramBotAccess() {
+export function TelegramBotAccess({ compact = false }: { readonly compact?: boolean }) {
   const [copyMessage, setCopyMessage] = useState('Copy bot link')
 
   const copyLink = async () => {
@@ -1681,8 +1699,7 @@ export function TelegramBotAccess() {
 
   return (
     <div className="telegram-bot-access">
-      <p className="telegram-bot-username">{RALLYO_TELEGRAM_BOT_USERNAME}</p>
-      <p className="telegram-bot-url">{RALLYO_TELEGRAM_BOT_URL}</p>
+      {!compact ? <p className="telegram-bot-url">{RALLYO_TELEGRAM_BOT_URL}</p> : null}
       <div className="pair-bot-actions">
         <a
           className="button button-outline"

@@ -13,6 +13,12 @@ const bootstrap: AppBootstrap = {
     expiresAt: '2026-10-15T10:00:00.000Z',
   },
   player: { id: 'canonical-player', displayName: 'Alice', username: 'alice' },
+  telegram: {
+    linked: true,
+    identityId: 'telegram-alice',
+    username: 'alice',
+    displayName: 'Alice',
+  },
   progression: {
     totalXp: 48,
     todayClaimed: true,
@@ -70,7 +76,6 @@ describe('player identity and Telegram pairing UI', () => {
 
     expect(markup).toContain('Open Rallyo Bot')
     expect(markup).toContain('Send /pair')
-    expect(markup).toContain('@Rallyo_gamebot')
     expect(markup).toContain('https://t.me/Rallyo_gamebot')
     expect(markup).toContain('Copy bot link')
   })
@@ -78,7 +83,6 @@ describe('player identity and Telegram pairing UI', () => {
   it('keeps the Telegram bot username and URL visible beside open and copy actions', () => {
     const markup = renderToStaticMarkup(<TelegramBotAccess />)
 
-    expect(markup).toContain('@Rallyo_gamebot')
     expect(markup).toContain('https://t.me/Rallyo_gamebot')
     expect(markup).toContain('Open Rallyo Bot')
     expect(markup).toContain('Copy bot link')
