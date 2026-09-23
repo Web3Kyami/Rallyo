@@ -3,7 +3,12 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 
 import type { AppBootstrap } from '../api/client'
-import { PlayerProfilePage, TelegramBotAccess, TelegramPairingHelpDialog } from './player-views'
+import {
+  PlayerHomePage,
+  PlayerProfilePage,
+  TelegramBotAccess,
+  TelegramPairingHelpDialog,
+} from './player-views'
 import { SessionContext } from './session'
 
 const bootstrap: AppBootstrap = {
@@ -12,7 +17,7 @@ const bootstrap: AppBootstrap = {
     targetCommunityId: null,
     expiresAt: '2026-10-15T10:00:00.000Z',
   },
-  player: { id: 'canonical-player', displayName: 'Alice', username: 'alice' },
+  player: { id: 'canonical-player', displayName: 'Alice', username: 'alice', nickname: null },
   telegram: {
     linked: true,
     identityId: 'telegram-alice',
@@ -47,6 +52,39 @@ const bootstrap: AppBootstrap = {
 }
 
 describe('player identity and Telegram pairing UI', () => {
+  it('prompts a wallet-only Player for a persistent nickname and offers editing on You', () => {
+    const walletOnly: AppBootstrap = {
+      ...bootstrap,
+      player: { id: 'wallet-player', displayName: 'Rallyo player', username: null, nickname: null },
+      telegram: { linked: false },
+      communities: [],
+    }
+    const session = {
+      status: 'ready' as const,
+      data: walletOnly,
+      error: null,
+      refresh: () => Promise.resolve(),
+      logout: () => Promise.resolve(),
+    }
+    const home = renderToStaticMarkup(
+      <MemoryRouter>
+        <SessionContext.Provider value={session}>
+          <PlayerHomePage />
+        </SessionContext.Provider>
+      </MemoryRouter>,
+    )
+    const profile = renderToStaticMarkup(
+      <MemoryRouter>
+        <SessionContext.Provider value={session}>
+          <PlayerProfilePage />
+        </SessionContext.Provider>
+      </MemoryRouter>,
+    )
+    expect(home).toContain('What should Rallyo call you?')
+    expect(home).toContain('Save nickname')
+    expect(profile).toContain('Add a nickname')
+  })
+
   it('renders the same connected Telegram, Nimiq, and community state after wallet linking', () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter>
@@ -55,8 +93,8 @@ describe('player identity and Telegram pairing UI', () => {
             status: 'ready',
             data: bootstrap,
             error: null,
-            refresh: async () => undefined,
-            logout: async () => undefined,
+            refresh: () => Promise.resolve(),
+            logout: () => Promise.resolve(),
           }}
         >
           <PlayerProfilePage />

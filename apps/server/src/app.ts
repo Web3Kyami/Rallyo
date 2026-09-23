@@ -542,6 +542,16 @@ export function buildServer(options: ServerOptions = {}) {
       }
     })
 
+    app.patch<{ Body: { nickname?: unknown } }>('/api/app/me/nickname', async (request, reply) => {
+      const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
+      if (!actor) return
+      try {
+        return await appApiService.updateNickname(actor, request.body?.nickname)
+      } catch (error) {
+        return sendAppApiError(reply, error)
+      }
+    })
+
     app.get('/api/app/progression', async (request, reply) => {
       const actor = await requireAppSession(request.headers.cookie, appSessionService, reply)
       if (!actor) return

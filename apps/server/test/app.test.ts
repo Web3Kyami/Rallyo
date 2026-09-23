@@ -376,6 +376,8 @@ describe('server health', () => {
     }
     const appApiService = {
       bootstrap: () => Promise.resolve({ player: { id: 'player-1' } }),
+      updateNickname: (actor: { playerId: string }, nickname: unknown) =>
+        Promise.resolve({ playerId: actor.playerId, nickname }),
     }
     const sessionApp = buildServer({
       appSessionService: appSessionService as never,
@@ -388,6 +390,17 @@ describe('server health', () => {
       url: '/api/app/me',
       headers: { cookie: 'rallyo_session=valid-session' },
     })
+    const anonymousNickname = await sessionApp.inject({
+      method: 'PATCH',
+      url: '/api/app/me/nickname',
+      payload: { nickname: 'Kyami' },
+    })
+    const authenticatedNickname = await sessionApp.inject({
+      method: 'PATCH',
+      url: '/api/app/me/nickname',
+      headers: { cookie: 'rallyo_session=valid-session' },
+      payload: { nickname: 'Kyami', playerId: 'untrusted-player' },
+    })
 
     expect(anonymous.statusCode).toBe(401)
     const anonymousBody = JSON.parse(anonymous.body) as {
@@ -396,6 +409,8 @@ describe('server health', () => {
     expect(anonymousBody.error.code).toBe('UNAUTHENTICATED')
     expect(authenticated.statusCode).toBe(200)
     expect(authenticated.json()).toEqual({ player: { id: 'player-1' } })
+    expect(anonymousNickname.statusCode).toBe(401)
+    expect(authenticatedNickname.json()).toEqual({ playerId: 'player-1', nickname: 'Kyami' })
     await sessionApp.close()
   })
 

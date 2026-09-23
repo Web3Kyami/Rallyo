@@ -2916,6 +2916,35 @@
   background: #d8e2ff;
 }
 
+.nickname-prompt {
+  margin: 16px 0;
+  padding: 20px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-control);
+  background: var(--rallyo-soft);
+  box-shadow: var(--shadow-primary);
+}
+
+.nickname-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.nickname-form label {
+  width: 100%;
+  font-weight: 700;
+}
+
+.nickname-form input {
+  min-width: 0;
+  flex: 1 1 180px;
+  padding: 10px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-control);
+}
+
 .profile-wallet-icon {
   background: var(--quiz);
 }

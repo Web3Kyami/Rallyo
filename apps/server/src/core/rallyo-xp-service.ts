@@ -2,6 +2,7 @@ import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 
 import * as schema from '../db/schema'
+import { playerDisplayNameSql } from './player-display-name'
 
 type Database = NodePgDatabase<typeof schema>
 
@@ -123,7 +124,10 @@ export class RallyoXpService {
     const rows = await this.database
       .select({
         playerId: schema.players.id,
-        displayName: sql<string>`coalesce(max(${schema.telegramIdentities.displayName}), 'Rallyo player')`,
+        displayName: playerDisplayNameSql(
+          sql`max(${schema.telegramIdentities.displayName})`,
+          schema.players.nickname,
+        ),
         totalXp: sql<string>`coalesce(sum(${schema.rallyoXpEvents.amountXp}), 0)`,
         createdAt: schema.players.createdAt,
       })
@@ -133,7 +137,7 @@ export class RallyoXpService {
         eq(schema.telegramIdentities.playerId, schema.players.id),
       )
       .leftJoin(schema.rallyoXpEvents, eq(schema.rallyoXpEvents.playerId, schema.players.id))
-      .groupBy(schema.players.id, schema.players.createdAt)
+      .groupBy(schema.players.id, schema.players.createdAt, schema.players.nickname)
       .orderBy(
         desc(sql`coalesce(sum(${schema.rallyoXpEvents.amountXp}), 0)`),
         asc(schema.players.createdAt),

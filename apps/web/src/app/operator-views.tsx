@@ -589,7 +589,7 @@ export function OperatorPlayerDetailPage() {
       </Link>
       <OperatorPageHeader
         eyebrow="PLAYER RECORD"
-        title={primaryTelegram?.displayName ?? 'Rallyo player'}
+        title={primaryTelegram?.displayName ?? data.player.nickname ?? 'Rallyo player'}
         detail={`Player ID ${data.player.id}`}
         action={
           <ToneBadge tone={currentWallet ? 'success' : 'neutral'}>

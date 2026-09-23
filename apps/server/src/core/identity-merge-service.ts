@@ -24,7 +24,7 @@ export async function mergeWalletPlayerIntoTelegramPlayer(
 
   const playerIds = [input.telegramPlayerId, input.walletPlayerId].sort()
   const players = await database
-    .select({ id: schema.players.id })
+    .select({ id: schema.players.id, nickname: schema.players.nickname })
     .from(schema.players)
     .where(inArray(schema.players.id, playerIds))
     .orderBy(asc(schema.players.id))
@@ -109,7 +109,15 @@ export async function mergeWalletPlayerIntoTelegramPlayer(
 
   await database
     .update(schema.players)
-    .set({ lastSeenAt: input.now })
+    .set({
+      lastSeenAt: input.now,
+      ...(players.find((player) => player.id === input.telegramPlayerId)?.nickname
+        ? {}
+        : {
+            nickname:
+              players.find((player) => player.id === input.walletPlayerId)?.nickname ?? null,
+          }),
+    })
     .where(eq(schema.players.id, input.telegramPlayerId))
   await database.delete(schema.players).where(eq(schema.players.id, input.walletPlayerId))
 

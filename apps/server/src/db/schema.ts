@@ -117,6 +117,7 @@ export type CapabilityConfig = Record<string, unknown>
 
 export const players = pgTable('players', {
   id: uuid('id').defaultRandom().primaryKey(),
+  nickname: text('nickname'),
   createdAt: createdAt(),
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
 })

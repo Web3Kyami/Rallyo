@@ -18,6 +18,7 @@ import type { AnyPgTable } from 'drizzle-orm/pg-core'
 import type { RallyoDatabase } from '../db/client'
 import * as schema from '../db/schema'
 import { issueTelegramPairingCode } from './app-session-service'
+import { resolvePlayerDisplayName, playerDisplayNameSql } from './player-display-name'
 
 const GAME_KEYS = ['project_quiz', 'word_seek', 'scramble'] as const
 const RECENT_SCORE_LIMIT = 8
@@ -251,6 +252,7 @@ export class OperatorConsoleService {
       : normalizedQuery
     const conditions = [
       ilike(schema.telegramIdentities.username, `%${escapeLike(usernameQuery)}%`),
+      ilike(schema.players.nickname, `%${escapeLike(normalizedQuery)}%`),
       sql`lower(${schema.walletIdentities.address}) = lower(${normalizedQuery})`,
     ]
     if (isUuid(normalizedQuery)) conditions.push(eq(schema.players.id, normalizedQuery))
@@ -279,6 +281,7 @@ export class OperatorConsoleService {
     const [player] = await this.database
       .select({
         id: schema.players.id,
+        nickname: schema.players.nickname,
         createdAt: schema.players.createdAt,
         lastSeenAt: schema.players.lastSeenAt,
       })
@@ -562,6 +565,7 @@ export class OperatorConsoleService {
       this.database
         .select({
           id: schema.players.id,
+          nickname: schema.players.nickname,
           createdAt: schema.players.createdAt,
           lastSeenAt: schema.players.lastSeenAt,
         })
@@ -600,7 +604,7 @@ export class OperatorConsoleService {
     if (!player[0]) throw new OperatorConsoleNotFoundError('Player not found.')
     return {
       id: player[0].id,
-      displayName: telegram[0]?.displayName ?? 'Rallyo player',
+      displayName: resolvePlayerDisplayName(telegram[0]?.displayName ?? null, player[0].nickname),
       username: telegram[0]?.username ?? null,
       telegramUserId: telegram[0]?.telegramUserId.toString() ?? null,
       walletAddress: wallet[0]?.address ?? null,
@@ -665,20 +669,27 @@ export class OperatorConsoleService {
     if (rows.length === 0) return []
     const identities = await this.database
       .select({
-        playerId: schema.telegramIdentities.playerId,
-        displayName: schema.telegramIdentities.displayName,
+        playerId: schema.players.id,
+        displayName: playerDisplayNameSql(
+          schema.telegramIdentities.displayName,
+          schema.players.nickname,
+        ),
       })
-      .from(schema.telegramIdentities)
+      .from(schema.players)
+      .leftJoin(
+        schema.telegramIdentities,
+        eq(schema.telegramIdentities.playerId, schema.players.id),
+      )
       .where(
         inArray(
-          schema.telegramIdentities.playerId,
+          schema.players.id,
           rows.map((row) => row.playerId),
         ),
       )
     const names = new Map(identities.map((identity) => [identity.playerId, identity.displayName]))
     return rows.map((row, index) => ({
       playerId: row.playerId,
-      displayName: names.get(row.playerId) ?? 'Rallyo player',
+      displayName: names.get(row.playerId) ?? resolvePlayerDisplayName(null, null),
       rank: index + 1,
       scoreEventCount: Number(row.scoreEventCount),
       points: Number(row.points),
@@ -690,7 +701,10 @@ export class OperatorConsoleService {
       .select({
         id: schema.scoreEvents.id,
         playerId: schema.scoreEvents.playerId,
-        playerName: schema.telegramIdentities.displayName,
+        playerName: playerDisplayNameSql(
+          schema.telegramIdentities.displayName,
+          schema.players.nickname,
+        ),
         communityId: schema.scoreEvents.communityId,
         communityTitle: schema.communities.title,
         sourceType: schema.scoreEvents.sourceType,
@@ -699,6 +713,7 @@ export class OperatorConsoleService {
         createdAt: schema.scoreEvents.createdAt,
       })
       .from(schema.scoreEvents)
+      .innerJoin(schema.players, eq(schema.players.id, schema.scoreEvents.playerId))
       .leftJoin(
         schema.telegramIdentities,
         eq(schema.telegramIdentities.playerId, schema.scoreEvents.playerId),
@@ -707,7 +722,7 @@ export class OperatorConsoleService {
       .where(communityId ? eq(schema.scoreEvents.communityId, communityId) : undefined)
       .orderBy(desc(schema.scoreEvents.createdAt))
       .limit(RECENT_SCORE_LIMIT)
-    return rows.map((row) => ({ ...row, playerName: row.playerName ?? 'Rallyo player' }))
+    return rows
   }
 
   private async communityStats(communityId: string, now = new Date()) {

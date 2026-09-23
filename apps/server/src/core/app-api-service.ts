@@ -13,6 +13,7 @@ import { assertCommunityAdmin, CommunityAuthorizationError } from './community-a
 import { communityAdminSnapshot, listAdminCommunities } from '../telegram/persistence'
 import { QuestionBankService, QuestionBankValidationError } from './question-bank-service'
 import { RallyoXpService } from './rallyo-xp-service'
+import { resolvePlayerDisplayName, validatePlayerNickname } from './player-display-name'
 import { RewardService } from './reward-service'
 import { RoundService } from './round-service'
 import { SocialTaskError, SocialTaskService } from './social-task-service'
@@ -64,6 +65,11 @@ export class AppApiService {
   }
 
   async bootstrap(actor: AppSessionActor, now = new Date()) {
+    const [player] = await this.database
+      .select({ nickname: schema.players.nickname })
+      .from(schema.players)
+      .where(eq(schema.players.id, actor.playerId))
+      .limit(1)
     const [identity] = actor.telegramIdentityId
       ? await this.database
           .select({
@@ -95,7 +101,11 @@ export class AppApiService {
       },
       player: {
         id: actor.playerId,
-        displayName: identity?.displayName ?? 'Rallyo player',
+        displayName: resolvePlayerDisplayName(
+          identity?.displayName ?? null,
+          player?.nickname ?? null,
+        ),
+        nickname: player?.nickname ?? null,
         username: identity?.username ?? null,
       },
       telegram: identity
@@ -115,6 +125,22 @@ export class AppApiService {
         globalLeague: true,
       },
     }
+  }
+
+  async updateNickname(actor: AppSessionActor, value: unknown) {
+    let nickname: string
+    try {
+      nickname = validatePlayerNickname(value)
+    } catch (error) {
+      throw new AppApiValidationError(error instanceof Error ? error.message : 'Invalid nickname.')
+    }
+    const [player] = await this.database
+      .update(schema.players)
+      .set({ nickname })
+      .where(eq(schema.players.id, actor.playerId))
+      .returning({ nickname: schema.players.nickname })
+    if (!player) throw new AppApiNotFoundError('Rallyo Player not found.')
+    return player
   }
 
   async progression(actor: AppSessionActor, now = new Date()) {
@@ -218,21 +244,32 @@ export class AppApiService {
     const scoreRows = await this.roundService.leaderboardForSeason(communityId, season.id)
     const playerIds = scoreRows.map((row) => row.playerId)
     if (playerIds.length === 0) return []
-    const identities = await this.database
-      .select({
-        playerId: schema.telegramIdentities.playerId,
-        displayName: schema.telegramIdentities.displayName,
-      })
-      .from(schema.telegramIdentities)
-      .where(inArray(schema.telegramIdentities.playerId, playerIds))
-    const names = new Map(identities.map((row) => [row.playerId, row.displayName]))
+    const names = await this.playerNames(playerIds)
     return scoreRows.map((row) => ({
       playerId: row.playerId,
-      displayName: names.get(row.playerId) ?? 'Rallyo player',
+      displayName: names.get(row.playerId) ?? resolvePlayerDisplayName(null, null),
       points: row.points,
       rank: row.rank,
       isCurrentPlayer: row.playerId === actor.playerId,
     }))
+  }
+
+  private async playerNames(playerIds: readonly string[]) {
+    const rows = await this.database
+      .select({
+        playerId: schema.players.id,
+        nickname: schema.players.nickname,
+        telegramName: schema.telegramIdentities.displayName,
+      })
+      .from(schema.players)
+      .leftJoin(
+        schema.telegramIdentities,
+        eq(schema.telegramIdentities.playerId, schema.players.id),
+      )
+      .where(inArray(schema.players.id, [...playerIds]))
+    return new Map(
+      rows.map((row) => [row.playerId, resolvePlayerDisplayName(row.telegramName, row.nickname)]),
+    )
   }
 
   async tasks(actor: AppSessionActor, communityId?: string, now = new Date()) {
@@ -469,6 +506,9 @@ export class AppApiService {
       this.socialTasks.listActive(communityId, now),
       this.socialTasks.listPendingSubmissions(communityId, now),
     ])
+    const names = await this.playerNames(
+      pendingSubmissions.map(({ submission }) => submission.playerId),
+    )
 
     return {
       tasks: tasks.map((task) => ({
@@ -488,7 +528,7 @@ export class AppApiService {
         taskId: submission.taskId,
         taskTitle: task.title,
         player: {
-          displayName: player.displayName,
+          displayName: names.get(submission.playerId) ?? player.displayName,
           username: player.username,
         },
         reference: submission.reference,

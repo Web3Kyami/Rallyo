@@ -518,6 +518,7 @@ export function PlayerHomePage() {
     'idle' | 'claiming' | 'success' | 'already' | 'error'
   >('idle')
   const [checkinError, setCheckinError] = useState<string | null>(null)
+  const [nicknamePromptDismissed, setNicknamePromptDismissed] = useState(false)
 
   useEffect(() => {
     if (!data) return
@@ -527,6 +528,7 @@ export function PlayerHomePage() {
 
   if (!data) return null
   const { player } = data
+  const needsNickname = !data.telegram.linked && data.wallet.linked && !player.nickname
   const currentProgression = progression ?? data.progression
 
   const visibleCommunities = communities.slice(0, 3)
@@ -540,7 +542,9 @@ export function PlayerHomePage() {
     >
       <RallyoProgressionSummary progression={currentProgression} />
 
-      {checkinOpen ? (
+      {needsNickname && !nicknamePromptDismissed ? (
+        <NicknamePrompt onClose={() => setNicknamePromptDismissed(true)} />
+      ) : checkinOpen ? (
         <DailyCheckinDialog
           error={checkinError}
           state={checkinState}
@@ -565,7 +569,7 @@ export function PlayerHomePage() {
           onClose={() => setCheckinOpen(false)}
         />
       ) : null}
-      {!player.username ? (
+      {!data.telegram.linked ? (
         <StatusBanner
           icon="telegram"
           title="Connect Telegram to restore your communities"
@@ -1377,6 +1381,78 @@ export function PlayerPairPage() {
   )
 }
 
+function NicknameEditor({
+  prompt = false,
+  onClose,
+}: {
+  readonly prompt?: boolean
+  readonly onClose?: () => void
+}) {
+  const session = useAppSession()
+  const current = session.status === 'ready' ? session.data.player.nickname : null
+  const [nickname, setNickname] = useState(current ?? '')
+  const [editing, setEditing] = useState(prompt)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const save = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setError(null)
+    setSaving(true)
+    try {
+      await api.updateNickname(nickname)
+      await session.refresh()
+      setEditing(false)
+      onClose?.()
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'Could not save your nickname.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className={prompt ? 'nickname-prompt' : 'profile-method'}>
+      <div>
+        <SectionLabel>PLAYER NICKNAME</SectionLabel>
+        <h2>{prompt ? 'What should Rallyo call you?' : (current ?? 'Add a nickname')}</h2>
+        <p>Used when you have no Telegram display name. You can change it later.</p>
+      </div>
+      {editing ? (
+        <form className="nickname-form" onSubmit={(event) => void save(event)}>
+          <label htmlFor={prompt ? 'home-nickname' : 'profile-nickname'}>Nickname</label>
+          <input
+            id={prompt ? 'home-nickname' : 'profile-nickname'}
+            autoComplete="nickname"
+            maxLength={64}
+            minLength={2}
+            required
+            value={nickname}
+            onChange={(event) => setNickname(event.target.value)}
+          />
+          {error ? <p role="alert">{error}</p> : null}
+          <Button type="submit" disabled={saving}>
+            {saving ? 'Saving…' : 'Save nickname'}
+          </Button>
+          {prompt ? (
+            <Button type="button" variant="secondary" onClick={onClose}>
+              Not now
+            </Button>
+          ) : null}
+        </form>
+      ) : (
+        <Button type="button" variant="secondary" onClick={() => setEditing(true)}>
+          {current ? 'Edit nickname' : 'Add nickname'}
+        </Button>
+      )}
+    </section>
+  )
+}
+
+function NicknamePrompt({ onClose }: { readonly onClose: () => void }) {
+  return <NicknameEditor prompt onClose={onClose} />
+}
+
 export function PlayerProfilePage() {
   const session = useAppSession()
   const [copied, setCopied] = useState(false)
@@ -1424,6 +1500,8 @@ export function PlayerProfilePage() {
           Change avatar
         </Link>
       </section>
+
+      <NicknameEditor />
 
       <RallyoProgressionSummary progression={progression} showCheckinState />
 
@@ -1673,7 +1751,7 @@ export function TelegramBotAccess({ compact = false }: { readonly compact?: bool
   const [copyMessage, setCopyMessage] = useState('Copy bot link')
 
   const copyLink = async () => {
-    let copied = false
+    let copied: boolean
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Clipboard API is unavailable.')
       await navigator.clipboard.writeText(RALLYO_TELEGRAM_BOT_URL)

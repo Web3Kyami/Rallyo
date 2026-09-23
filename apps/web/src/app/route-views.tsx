@@ -5,6 +5,7 @@ import { ErrorState, LoadingState, PageFrame, ToneBadge } from '../components/pr
 import { Icon, RallyoBrand } from '../components/design-system'
 import { useAppSession } from './session'
 import { PlayerEntryPage } from './player-views'
+import { RALLYO_TELEGRAM_BOT_URL } from '../platform/telegram'
 
 export function PublicHome() {
   return (
@@ -15,16 +16,25 @@ export function PublicHome() {
             <p className="eyebrow">TELEGRAM-FIRST COMPETITION</p>
           </div>
           <h1>
-            Play the moment.
-            <span>Keep the record.</span>
+            Play project games in Telegram.
+            <span>Keep your Rallyo record.</span>
           </h1>
           <p className="landing-lede">
-            Games, community tasks, seasons, and rewards in one Rallyo record.
+            Add Rallyo Bot to your community. Play project-specific games, earn community points,
+            and follow your season rank in Rallyo.
           </p>
           <div className="landing-actions">
             <Link className="button button-primary" to="/app/open">
               Open Rallyo
             </Link>
+            <a
+              className="button button-outline"
+              href={`${RALLYO_TELEGRAM_BOT_URL}?startgroup=true`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Add Rallyo Bot
+            </a>
             <a className="button button-outline" href="#how-it-works">
               See how it works
             </a>
@@ -46,10 +56,13 @@ export function PublicHome() {
       <section className="landing-section" id="how-it-works">
         <div className="landing-section-intro">
           <div>
-            <p className="eyebrow">THE MODEL</p>
-            <h2>The live game is in Telegram. The momentum stays in Rallyo.</h2>
+            <p className="eyebrow">PROJECT-SPECIFIC GAMES</p>
+            <h2>Your project's knowledge becomes the game.</h2>
           </div>
-          <p>Rallyo gives community participation a visible record across the places you play.</p>
+          <p>
+            Admins approve questions and project words. Players compete in Telegram and see their
+            record in Rallyo.
+          </p>
         </div>
         <div className="landing-model">
           <div className="landing-game-list">
@@ -59,19 +72,19 @@ export function PublicHome() {
             </div>
             <LandingGame
               accent="quiz"
-              detail="Project knowledge and first-correct races."
+              detail="Approved questions about your project. Race to answer first."
               icon="list"
               name="Quiz / Race"
             />
             <LandingGame
               accent="scramble"
-              detail="Solve mixed-up project terms."
+              detail="Unscramble your project's approved terms."
               icon="game"
               name="Scramble"
             />
             <LandingGame
               accent="word-seek"
-              detail="Find the hidden word before the round ends."
+              detail="Find a hidden project word before the round ends."
               icon="search"
               name="Word Seek"
             />
@@ -109,10 +122,22 @@ export function PublicHome() {
           <p>Each step leaves a useful record for the player and the community.</p>
         </div>
         <div className="loop-grid">
-          <LoopStep title="Play" detail="Answer enabled games in Telegram." />
-          <LoopStep title="Contribute" detail="Complete real community tasks." />
-          <LoopStep title="Climb" detail="Follow rank and points by season." />
-          <LoopStep title="Earn" detail="Claim rewards when the community enables them." />
+          <LoopStep
+            title="1. Add the bot"
+            detail="Bring Rallyo Bot into your Telegram community."
+          />
+          <LoopStep
+            title="2. Play and contribute"
+            detail="Join project games and complete reviewed tasks."
+          />
+          <LoopStep
+            title="3. See your record"
+            detail="Follow points and rank by community season."
+          />
+          <LoopStep
+            title="Claim rewards"
+            detail="Connect Nimiq before claiming eligible rewards."
+          />
         </div>
       </section>
 

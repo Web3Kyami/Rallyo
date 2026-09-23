@@ -92,6 +92,11 @@ function safeHttpError(status: number): ApiErrorShape {
 
 export const api = {
   bootstrap: () => request<AppBootstrap>('/api/app/me'),
+  updateNickname: (nickname: string) =>
+    request<{ readonly nickname: string }>('/api/app/me/nickname', {
+      method: 'PATCH',
+      body: JSON.stringify({ nickname }),
+    }),
   progression: () => request<RallyoProgression>('/api/app/progression'),
   claimDailyCheckin: () =>
     request<DailyCheckinClaimResult>('/api/app/progression/daily-checkin', { method: 'POST' }),
@@ -410,7 +415,16 @@ export type AppBootstrap = {
     readonly id: string
     readonly displayName: string
     readonly username: string | null
+    readonly nickname: string | null
   }
+  readonly telegram:
+    | {
+        readonly linked: true
+        readonly identityId: string
+        readonly username: string | null
+        readonly displayName: string
+      }
+    | { readonly linked: false }
   readonly progression: RallyoProgression
   readonly wallet: { readonly linked: true; readonly address: string } | { readonly linked: false }
   readonly communities: readonly AppCommunity[]
@@ -683,7 +697,12 @@ export type OperatorPlayerSearchResult = {
 }
 
 export type OperatorPlayerDetail = {
-  readonly player: { readonly id: string; readonly createdAt: string; readonly lastSeenAt: string }
+  readonly player: {
+    readonly id: string
+    readonly nickname: string | null
+    readonly createdAt: string
+    readonly lastSeenAt: string
+  }
   readonly telegramIdentities: readonly {
     readonly id: string
     readonly telegramUserId: string

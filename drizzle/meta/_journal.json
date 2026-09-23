@@ -134,6 +134,13 @@
       "when": 1789971040568,
       "tag": "0018_mini_app_signer_address",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790199101454,
+      "tag": "0019_player_nickname",
+      "breakpoints": true
     }
   ]
 }
