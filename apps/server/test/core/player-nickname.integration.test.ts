@@ -2,9 +2,11 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { eq, sql } from 'drizzle-orm'
 
 import { AppApiService } from '../../src/core/app-api-service'
+import { AppSessionService } from '../../src/core/app-session-service'
 import { mergeWalletPlayerIntoTelegramPlayer } from '../../src/core/identity-merge-service'
 import { createDatabase } from '../../src/db/client'
 import * as schema from '../../src/db/schema'
+import { buildServer } from '../../src/app'
 
 const databaseUrl = process.env.DATABASE_URL
 const describeDatabase = databaseUrl ? describe : describe.skip
@@ -47,6 +49,110 @@ describeDatabase('persistent Player nickname against PostgreSQL', () => {
       nickname: 'Kyami',
     })
     await expect(appApi.updateNickname(actor(walletPlayerId), '<script>')).rejects.toThrow()
+  })
+
+  it('persists and bootstraps a nickname through the authenticated HTTP routes', async () => {
+    const appSessions = new AppSessionService(db)
+    const issued = await appSessions.createSession({ playerId: walletPlayerId, now })
+    const server = buildServer({ database: db, appSessionCookieSecure: false })
+    try {
+      const patch = await server.inject({
+        method: 'PATCH',
+        url: '/api/app/me/nickname',
+        headers: { cookie: `rallyo_session=${issued.token}` },
+        payload: { nickname: 'Francis' },
+      })
+      expect(patch.statusCode).toBe(200)
+      expect(patch.json()).toEqual({ nickname: 'Francis' })
+
+      const [persisted] = await db
+        .select({ nickname: schema.players.nickname })
+        .from(schema.players)
+        .where(eq(schema.players.id, walletPlayerId))
+      expect(persisted?.nickname).toBe('Francis')
+
+      const bootstrap = await server.inject({
+        method: 'GET',
+        url: '/api/app/me',
+        headers: { cookie: `rallyo_session=${issued.token}` },
+      })
+      expect(bootstrap.statusCode).toBe(200)
+      const bootstrapBody: {
+        readonly player: {
+          readonly id: string
+          readonly displayName: string
+          readonly nickname: string
+        }
+      } = bootstrap.json()
+      expect(bootstrapBody.player).toMatchObject({
+        id: walletPlayerId,
+        displayName: 'Francis',
+        nickname: 'Francis',
+      })
+
+      const invalid = await server.inject({
+        method: 'PATCH',
+        url: '/api/app/me/nickname',
+        headers: { cookie: `rallyo_session=${issued.token}` },
+        payload: { nickname: '<Francis>' },
+      })
+      expect(invalid.statusCode).toBe(400)
+      const invalidBody: { readonly error: { readonly code: string } } = invalid.json()
+      expect(invalidBody.error.code).toBe('INVALID_REQUEST')
+
+      const anonymous = await server.inject({
+        method: 'PATCH',
+        url: '/api/app/me/nickname',
+        payload: { nickname: 'Francis' },
+      })
+      expect(anonymous.statusCode).toBe(401)
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('keeps Telegram-linked nickname updates on the canonical Player', async () => {
+    await db.insert(schema.telegramIdentities).values({
+      id: telegramIdentityId,
+      playerId: telegramPlayerId,
+      telegramUserId: 7001n,
+      displayName: 'Telegram Kyami',
+    })
+    const appSessions = new AppSessionService(db)
+    const issued = await appSessions.createSession({
+      playerId: telegramPlayerId,
+      telegramIdentityId,
+      now,
+    })
+    const server = buildServer({ database: db, appSessionCookieSecure: false })
+    try {
+      const response = await server.inject({
+        method: 'PATCH',
+        url: '/api/app/me/nickname',
+        headers: { cookie: `rallyo_session=${issued.token}` },
+        payload: { nickname: 'Francis' },
+      })
+      expect(response.statusCode).toBe(200)
+      const bootstrap = await server.inject({
+        method: 'GET',
+        url: '/api/app/me',
+        headers: { cookie: `rallyo_session=${issued.token}` },
+      })
+      const bootstrapBody: {
+        readonly player: {
+          readonly displayName: string
+          readonly nickname: string
+          readonly username: string | null
+        }
+      } = bootstrap.json()
+      expect(bootstrapBody.player).toMatchObject({
+        displayName: 'Telegram Kyami',
+        nickname: 'Francis',
+        username: null,
+      })
+    } finally {
+      await server.close()
+    }
   })
 
   it('preserves wallet nickname on safe Telegram pairing while preferring Telegram display name', async () => {

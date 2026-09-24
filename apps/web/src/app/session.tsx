@@ -9,7 +9,7 @@ type SessionState =
   | { readonly status: 'anonymous'; readonly data: null; readonly error: ApiError | null }
 
 type SessionContextValue = SessionState & {
-  readonly refresh: () => Promise<void>
+  readonly refresh: () => Promise<boolean>
   readonly logout: () => Promise<void>
 }
 
@@ -25,16 +25,22 @@ export function SessionProvider({ children }: { readonly children: React.ReactNo
       )
       const data = await api.bootstrap()
       setState({ status: 'ready', data, error: null })
+      return true
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         setState({ status: 'anonymous', data: null, error })
       } else {
-        setState({
-          status: 'anonymous',
-          data: null,
-          error: error instanceof ApiError ? error : null,
-        })
+        setState((current) =>
+          current.status === 'ready'
+            ? current
+            : {
+                status: 'anonymous',
+                data: null,
+                error: error instanceof ApiError ? error : null,
+              },
+        )
       }
+      return false
     }
   }
 

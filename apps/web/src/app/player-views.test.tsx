@@ -63,7 +63,7 @@ describe('player identity and Telegram pairing UI', () => {
       status: 'ready' as const,
       data: walletOnly,
       error: null,
-      refresh: () => Promise.resolve(),
+      refresh: () => Promise.resolve(true),
       logout: () => Promise.resolve(),
     }
     const home = renderToStaticMarkup(
@@ -81,8 +81,38 @@ describe('player identity and Telegram pairing UI', () => {
       </MemoryRouter>,
     )
     expect(home).toContain('What should Rallyo call you?')
-    expect(home).toContain('Save nickname')
+    expect(home).toContain('>Save<')
+    expect(home).toContain('identity-actions identity-actions-2')
+    expect(home).toContain('nickname-form-row')
     expect(profile).toContain('Add a nickname')
+  })
+
+  it('uses the full-width identity row when only Telegram remains to connect', () => {
+    const walletNamed: AppBootstrap = {
+      ...bootstrap,
+      player: { id: 'wallet-player', displayName: 'Francis', username: null, nickname: 'Francis' },
+      telegram: { linked: false },
+      communities: [],
+    }
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <SessionContext.Provider
+          value={{
+            status: 'ready',
+            data: walletNamed,
+            error: null,
+            refresh: () => Promise.resolve(true),
+            logout: () => Promise.resolve(),
+          }}
+        >
+          <PlayerHomePage />
+        </SessionContext.Provider>
+      </MemoryRouter>,
+    )
+
+    expect(markup).toContain('identity-actions identity-actions-1')
+    expect(markup).not.toContain('What should Rallyo call you?')
+    expect(markup).toContain('Welcome back, Francis.')
   })
 
   it('renders the same connected Telegram, Nimiq, and community state after wallet linking', () => {
@@ -93,7 +123,7 @@ describe('player identity and Telegram pairing UI', () => {
             status: 'ready',
             data: bootstrap,
             error: null,
-            refresh: () => Promise.resolve(),
+            refresh: () => Promise.resolve(true),
             logout: () => Promise.resolve(),
           }}
         >

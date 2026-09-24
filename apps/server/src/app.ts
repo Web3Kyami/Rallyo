@@ -548,6 +548,16 @@ export function buildServer(options: ServerOptions = {}) {
       try {
         return await appApiService.updateNickname(actor, request.body?.nickname)
       } catch (error) {
+        if (!(
+          error instanceof AppApiForbiddenError ||
+          error instanceof AppApiNotFoundError ||
+          error instanceof AppApiValidationError
+        )) {
+          request.log.error(
+            { err: error, route: '/api/app/me/nickname', playerId: actor.playerId },
+            'nickname update server failure',
+          )
+        }
         return sendAppApiError(reply, error)
       }
     })

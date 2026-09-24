@@ -8,6 +8,7 @@ describe('web API client errors', () => {
   })
 
   it('turns a non-JSON route failure into a useful safe error', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
@@ -18,10 +19,16 @@ describe('web API client errors', () => {
       ),
     )
 
-    await expect(request('/api/app/wallet/challenge', { method: 'POST' })).rejects.toMatchObject({
+    await expect(request('/api/app/me/nickname', { method: 'PATCH' })).rejects.toMatchObject({
       status: 405,
       code: 'API_ROUTE_UNAVAILABLE',
-      message: 'Rallyo could not reach the wallet service. Please try again later.',
+      message: 'Rallyo could not reach the Player profile service. Please try again later.',
+    })
+    expect(warning).toHaveBeenCalledWith('Rallyo API request failed', {
+      path: '/api/app/me/nickname',
+      method: 'PATCH',
+      status: 405,
+      contentType: 'text/html',
     })
   })
 

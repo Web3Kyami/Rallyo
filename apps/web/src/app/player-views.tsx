@@ -519,6 +519,8 @@ export function PlayerHomePage() {
   >('idle')
   const [checkinError, setCheckinError] = useState<string | null>(null)
   const [nicknamePromptDismissed, setNicknamePromptDismissed] = useState(false)
+  const [nicknameOverride, setNicknameOverride] = useState<string | null>(null)
+  const [nicknameSaveNotice, setNicknameSaveNotice] = useState<string | null>(null)
 
   useEffect(() => {
     if (!data) return
@@ -528,7 +530,11 @@ export function PlayerHomePage() {
 
   if (!data) return null
   const { player } = data
-  const needsNickname = !data.telegram.linked && data.wallet.linked && !player.nickname
+  const currentNickname = nicknameOverride ?? player.nickname
+  const needsNickname = !data.telegram.linked && data.wallet.linked && !currentNickname
+  const needsTelegram = !data.telegram.linked
+  const identityActionCount =
+    Number(needsNickname && !nicknamePromptDismissed) + Number(needsTelegram)
   const currentProgression = progression ?? data.progression
 
   const visibleCommunities = communities.slice(0, 3)
@@ -537,14 +543,12 @@ export function PlayerHomePage() {
   return (
     <PageFrame
       eyebrow="PLAYER HOME"
-      title={`Welcome back, ${player.displayName}.`}
+      title={`Welcome back, ${currentNickname ?? player.displayName}.`}
       detail="Your communities, seasons, and next tasks."
     >
       <RallyoProgressionSummary progression={currentProgression} />
 
-      {needsNickname && !nicknamePromptDismissed ? (
-        <NicknamePrompt onClose={() => setNicknamePromptDismissed(true)} />
-      ) : checkinOpen ? (
+      {checkinOpen ? (
         <DailyCheckinDialog
           error={checkinError}
           state={checkinState}
@@ -569,17 +573,39 @@ export function PlayerHomePage() {
           onClose={() => setCheckinOpen(false)}
         />
       ) : null}
-      {!data.telegram.linked ? (
-        <StatusBanner
-          icon="telegram"
-          title="Connect Telegram to restore your communities"
-          detail="Open Rallyo Bot, send /pair, then enter the one-time code here."
-          action={
-            <Link className="button button-primary" to="/app/pair">
-              Connect Telegram
-            </Link>
-          }
-        />
+      {nicknameSaveNotice ? (
+        <p className="identity-save-notice" role="status">
+          {nicknameSaveNotice}
+        </p>
+      ) : null}
+      {identityActionCount > 0 ? (
+        <div className={`identity-actions identity-actions-${identityActionCount}`}>
+          {needsNickname && !nicknamePromptDismissed ? (
+            <NicknamePrompt
+              onClose={() => setNicknamePromptDismissed(true)}
+              onSaved={(nickname, refreshed) => {
+                setNicknameOverride(nickname)
+                setNicknameSaveNotice(
+                  refreshed
+                    ? null
+                    : 'Nickname saved. Rallyo could not refresh this page yet, so the new name will appear after you reload.',
+                )
+              }}
+            />
+          ) : null}
+          {needsTelegram ? (
+            <StatusBanner
+              icon="telegram"
+              title="Connect Telegram to restore your communities"
+              detail="Open Rallyo Bot, send /pair, then enter the one-time code here."
+              action={
+                <Link className="button button-primary" to="/app/pair">
+                  Connect Telegram
+                </Link>
+              }
+            />
+          ) : null}
+        </div>
       ) : null}
 
       <section className="home-section home-communities-section">
@@ -1384,12 +1410,15 @@ export function PlayerPairPage() {
 function NicknameEditor({
   prompt = false,
   onClose,
+  onSaved,
 }: {
   readonly prompt?: boolean
   readonly onClose?: () => void
+  readonly onSaved?: ((nickname: string, refreshed: boolean) => void) | undefined
 }) {
   const session = useAppSession()
   const current = session.status === 'ready' ? session.data.player.nickname : null
+  const [savedNickname, setSavedNickname] = useState<string | null>(null)
   const [nickname, setNickname] = useState(current ?? '')
   const [editing, setEditing] = useState(prompt)
   const [saving, setSaving] = useState(false)
@@ -1401,8 +1430,15 @@ function NicknameEditor({
     setSaving(true)
     try {
       await api.updateNickname(nickname)
-      await session.refresh()
+      let refreshed = false
+      try {
+        refreshed = await session.refresh()
+      } catch {
+        refreshed = false
+      }
+      setSavedNickname(nickname)
       setEditing(false)
+      onSaved?.(nickname, refreshed)
       onClose?.()
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : 'Could not save your nickname.')
@@ -1415,29 +1451,37 @@ function NicknameEditor({
     <section className={prompt ? 'nickname-prompt' : 'profile-method'}>
       <div>
         <SectionLabel>PLAYER NICKNAME</SectionLabel>
-        <h2>{prompt ? 'What should Rallyo call you?' : (current ?? 'Add a nickname')}</h2>
+        <h2>
+          {prompt ? 'What should Rallyo call you?' : (savedNickname ?? current ?? 'Add a nickname')}
+        </h2>
         <p>Used when you have no Telegram display name. You can change it later.</p>
       </div>
       {editing ? (
         <form className="nickname-form" onSubmit={(event) => void save(event)}>
           <label htmlFor={prompt ? 'home-nickname' : 'profile-nickname'}>Nickname</label>
-          <input
-            id={prompt ? 'home-nickname' : 'profile-nickname'}
-            autoComplete="nickname"
-            maxLength={64}
-            minLength={2}
-            required
-            value={nickname}
-            onChange={(event) => setNickname(event.target.value)}
-          />
-          {error ? <p role="alert">{error}</p> : null}
-          <Button type="submit" disabled={saving}>
-            {saving ? 'Saving…' : 'Save nickname'}
-          </Button>
+          <div className="nickname-form-row">
+            <input
+              id={prompt ? 'home-nickname' : 'profile-nickname'}
+              autoComplete="nickname"
+              maxLength={64}
+              minLength={2}
+              required
+              value={nickname}
+              onChange={(event) => setNickname(event.target.value)}
+            />
+            <Button type="submit" disabled={saving}>
+              {saving ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
           {prompt ? (
             <Button type="button" variant="secondary" onClick={onClose}>
               Not now
             </Button>
+          ) : null}
+          {error ? (
+            <p className="nickname-form-error" role="alert">
+              {error}
+            </p>
           ) : null}
         </form>
       ) : (
@@ -1449,8 +1493,14 @@ function NicknameEditor({
   )
 }
 
-function NicknamePrompt({ onClose }: { readonly onClose: () => void }) {
-  return <NicknameEditor prompt onClose={onClose} />
+function NicknamePrompt({
+  onClose,
+  onSaved,
+}: {
+  readonly onClose: () => void
+  readonly onSaved?: ((nickname: string, refreshed: boolean) => void) | undefined
+}) {
+  return <NicknameEditor prompt onClose={onClose} onSaved={onSaved} />
 }
 
 export function PlayerProfilePage() {

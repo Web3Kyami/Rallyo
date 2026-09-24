@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { buildServer } from '../src/app'
+import { AppApiNotFoundError } from '../src/core/app-api-service'
 
 describe('server health', () => {
   const app = buildServer()
@@ -412,6 +413,39 @@ describe('server health', () => {
     expect(anonymousNickname.statusCode).toBe(401)
     expect(authenticatedNickname.json()).toEqual({ playerId: 'player-1', nickname: 'Kyami' })
     await sessionApp.close()
+  })
+
+  it('returns a structured not-found response when the nickname Player disappeared', async () => {
+    const server = buildServer({
+      appSessionService: {
+        getSession: () =>
+          Promise.resolve({
+            sessionId: 'missing-player-session',
+            playerId: 'missing-player',
+            telegramIdentityId: null,
+            telegramUserId: null,
+            targetCommunityId: null,
+            targetMode: 'player' as const,
+            expiresAt: new Date('2026-10-15T10:00:00.000Z'),
+          }),
+      } as never,
+      appApiService: {
+        updateNickname: () => Promise.reject(new AppApiNotFoundError('Rallyo Player not found.')),
+      } as never,
+    })
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/api/app/me/nickname',
+      headers: { cookie: 'rallyo_session=missing-player-session' },
+      payload: { nickname: 'Francis' },
+    })
+
+    expect(response.statusCode).toBe(404)
+    expect(response.json()).toEqual({
+      error: { code: 'NOT_FOUND', message: 'Rallyo Player not found.' },
+    })
+    await server.close()
   })
 
   it('keeps Rallyo progression and league routes behind the app session boundary', async () => {

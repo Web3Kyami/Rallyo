@@ -56,11 +56,12 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     if (!error) {
       console.warn('Rallyo API request failed', {
         path,
+        method: init?.method ?? 'GET',
         status: response.status,
         contentType: response.headers.get('content-type'),
       })
     }
-    throw new ApiError(response.status, error ?? safeHttpError(response.status))
+    throw new ApiError(response.status, error ?? safeHttpError(response.status, path))
   }
   if (payload === null) {
     throw new ApiError(502, {
@@ -71,7 +72,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T
 }
 
-function safeHttpError(status: number): ApiErrorShape {
+function safeHttpError(status: number, path: string): ApiErrorShape {
   if (status >= 500) {
     return {
       code: 'API_UNAVAILABLE',
@@ -79,6 +80,12 @@ function safeHttpError(status: number): ApiErrorShape {
     }
   }
   if (status === 405) {
+    if (path === '/api/app/me/nickname') {
+      return {
+        code: 'API_ROUTE_UNAVAILABLE',
+        message: 'Rallyo could not reach the Player profile service. Please try again later.',
+      }
+    }
     return {
       code: 'API_ROUTE_UNAVAILABLE',
       message: 'Rallyo could not reach the wallet service. Please try again later.',

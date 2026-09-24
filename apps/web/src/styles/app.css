@@ -2917,32 +2917,83 @@
 }
 
 .nickname-prompt {
-  margin: 16px 0;
-  padding: 20px;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 14px 16px;
   border: 2px solid var(--ink);
   border-radius: var(--radius-control);
   background: var(--rallyo-soft);
   box-shadow: var(--shadow-primary);
 }
 
+.identity-actions {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.identity-actions-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.identity-actions > * {
+  min-width: 0;
+}
+
+.identity-actions .status-banner {
+  height: 100%;
+  box-sizing: border-box;
+  margin: 0;
+}
+
+.identity-save-notice {
+  margin: 16px 0 -4px;
+  color: var(--success);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.nickname-prompt h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.nickname-prompt p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
 .nickname-form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  display: grid;
   gap: 10px;
 }
 
 .nickname-form label {
-  width: 100%;
   font-weight: 700;
+}
+
+.nickname-form-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
 }
 
 .nickname-form input {
   min-width: 0;
-  flex: 1 1 180px;
+  width: 100%;
   padding: 10px;
   border: 2px solid var(--ink);
   border-radius: var(--radius-control);
+}
+
+.nickname-form-error {
+  color: var(--danger) !important;
+  font-weight: 700;
 }
 
 .profile-wallet-icon {
@@ -3507,6 +3558,18 @@
 
   .home-action-empty {
     grid-column: auto;
+  }
+
+  .identity-actions-2 {
+    grid-template-columns: 1fr;
+  }
+
+  .nickname-form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .nickname-form-row .ds-button {
+    width: 100%;
   }
 
   .community-detail-header {
