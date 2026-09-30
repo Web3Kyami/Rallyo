@@ -991,6 +991,41 @@ async function claimConfiguredMultipleChoiceWinner(
     return insertedAnswers.length === 0 ? { status: 'DUPLICATE_ANSWER' } : { status: 'WRONG' }
   }
 
+  // Claim the answer row BEFORE locking the round, and let a correct answer take
+  // over the wrong answer a mis-tap already left behind.
+  //
+  // `answers_round_player_unique` is (roundId, playerId), so a wrong tap owns the
+  // player's only row for this round. Locking the round first meant a recovered
+  // correct answer hit that constraint, returned no rows, and threw
+  // ScoreAwardError -- rolling the round back to LIVE with no score awarded.
+  //
+  // The `where` guard keeps the upgrade one-way: once the row is correct, a later
+  // submission matches nothing, returns no rows, and is reported as a duplicate
+  // rather than double-scoring.
+  const insertedAnswers = await database
+    .insert(schema.answers)
+    .values({
+      roundId: round.id,
+      playerId: input.playerId,
+      telegramInputId: input.telegramInputId,
+      rawAnswer: input.rawAnswer,
+      normalizedAnswer: normalizeAnswer(input.rawAnswer),
+      isCorrect: true,
+    })
+    .onConflictDoUpdate({
+      target: [schema.answers.roundId, schema.answers.playerId],
+      set: {
+        isCorrect: true,
+        telegramInputId: input.telegramInputId,
+        rawAnswer: input.rawAnswer,
+        normalizedAnswer: normalizeAnswer(input.rawAnswer),
+      },
+      where: sql`${schema.answers.isCorrect} = false`,
+    })
+    .returning({ id: schema.answers.id })
+
+  if (insertedAnswers.length === 0) return { status: 'DUPLICATE_ANSWER' }
+
   const lockedRounds = await database
     .update(schema.rounds)
     .set({ state: 'LOCKED', version: sql`${schema.rounds.version} + 1` })
@@ -1004,21 +1039,6 @@ async function claimConfiguredMultipleChoiceWinner(
     .returning({ id: schema.rounds.id })
 
   if (lockedRounds.length === 0) return { status: 'ROUND_CLOSED' }
-
-  const insertedAnswers = await database
-    .insert(schema.answers)
-    .values({
-      roundId: round.id,
-      playerId: input.playerId,
-      telegramInputId: input.telegramInputId,
-      rawAnswer: input.rawAnswer,
-      normalizedAnswer: normalizeAnswer(input.rawAnswer),
-      isCorrect: true,
-    })
-    .onConflictDoNothing({ target: [schema.answers.roundId, schema.answers.playerId] })
-    .returning({ id: schema.answers.id })
-
-  if (insertedAnswers.length === 0) throw new ScoreAwardError(round.id, input.playerId)
 
   const points = pointsForRound(round, configuredClueNumberAt(round, input.now))
   await awardScore(database, round, input.playerId, points)
