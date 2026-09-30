@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 
 import * as schema from './schema'
@@ -38,7 +38,23 @@ export async function releaseTelegramUpdate(
   database: Database,
   telegramUpdateId: bigint,
 ): Promise<void> {
+  // Only reopen an update that is still unprocessed.
+  //
+  // Telegram redelivers an update when it does not receive a timely webhook
+  // response, and `next()` can throw AFTER the work has already been done.
+  // Deleting the row unconditionally turned that into a full replay: the next
+  // delivery re-claimed the update and re-ran completed work, double-counting
+  // activity and re-posting announcements.
+  //
+  // An update already marked processed stays on the row, so it is never
+  // re-claimed. Genuinely failed work is left unprocessed and becomes
+  // claimable again straight away.
   await database
     .delete(schema.telegramUpdates)
-    .where(eq(schema.telegramUpdates.telegramUpdateId, telegramUpdateId))
+    .where(
+      and(
+        eq(schema.telegramUpdates.telegramUpdateId, telegramUpdateId),
+        isNull(schema.telegramUpdates.processedAt),
+      ),
+    )
 }
